@@ -28,7 +28,13 @@ class RuxHost(private val context: Context, private val container: ViewGroup) {
     /** true while applying mutations — suppresses synchronously fired events (e.g. setText → TextWatcher). */
     private var applying = false
 
-    fun start() = RuxNative.nativeStart(this)
+    fun start() {
+        RuxNative.nativeStart(this)
+        // `rux run` passes its dev server address to debug builds (hot reload).
+        (context as? android.app.Activity)?.intent?.getStringExtra(RuxDevClient.EXTRA)?.let {
+            RuxDevClient.connect(context, it)
+        }
+    }
     fun stop() = RuxNative.nativeStop()
 
     // --- mutation protocol ---------------------------------------------------

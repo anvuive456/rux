@@ -37,6 +37,12 @@ public final class RuxHost {
             unlisten: { ctx, id, event in RuxHost.from(ctx).unlisten(id, String(cString: event)) }
         )
         rux_start(vtable)
+        #if DEBUG
+        // `rux run` passes its dev server address to debug builds (hot reload).
+        if let address = ProcessInfo.processInfo.environment[RuxDevClient.environmentKey] {
+            RuxDevClient.connect(address)
+        }
+        #endif
     }
 
     public func stop() {

@@ -1,0 +1,183 @@
+//! The hot reload session of `rux run` (debug builds), like `flutter run`:
+//! saving a file hot reloads; `r` hot reloads, `R` hot restarts, `q` quits.
+//!
+//! Each reload rebuilds only the app library, sends it to the app's dev client (see
+//! [`server`]), which loads it into the running process (`rux_platform::dev`). Hot reload
+//! keeps the app's state; hot restart constructs the app again.
+
+mod server;
+mod types;
+
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
+use std::path::{Path, PathBuf};
+use std::sync::mpsc;
+use std::time::{Duration, Instant};
+
+use anyhow::{Context, Result};
+use notify::{EventKind, RecursiveMode, Watcher};
+
+pub use server::DevServer;
+
+use crate::app::AppCrate;
+
+/// How long the app has to connect after launch.
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
+/// Editors often write a file in several steps; wait for them to settle.
+const DEBOUNCE: Duration = Duration::from_millis(150);
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Mode {
+    Reload,
+    Restart,
+}
+
+enum Input {
+    Changed,
+    Key(String),
+}
+
+/// Runs the session until the user quits. `build` rebuilds the app library for the device
+/// and returns its path.
+pub fn session(
+    app: &AppCrate,
+    server: &DevServer,
+    mut build: impl FnMut() -> Result<PathBuf>,
+) -> Result<()> {
+    println!("→ waiting for the app to connect…");
+    server.wait_for_app(CONNECT_TIMEOUT)?;
+
+    let (tx, rx) = mpsc::channel();
+    let _watcher = watch(&app.dir, tx.clone())?;
+    read_keys(tx);
+
+    println!(
+        "\n🔥 Hot reload is on: save a file to hot reload.\n   \
+         r ⏎  hot reload (keep state)   R ⏎  hot restart   q ⏎  quit\n"
+    );
+    let mut types = types::fingerprint(&app.dir);
+    // Sources as of the last build, to skip events that don't change anything (editors touching
+    // files, events delivered late).
+    let mut built_sources = sources_hash(&app.dir);
+    let mut reload = |mode: Mode| reload(app, server, &mut build, &mut types, mode);
+    for input in &rx {
+        let (mode, saved) = match input {
+            Input::Changed => {
+                // Coalesce the burst of events of one save.
+                std::thread::sleep(DEBOUNCE);
+                while let Ok(Input::Changed) = rx.try_recv() {}
+                (Mode::Reload, true)
+            }
+            Input::Key(key) => match key.as_str() {
+                "r" => (Mode::Reload, false),
+                "R" => (Mode::Restart, false),
+                "q" => break,
+                "" => continue,
+                _ => {
+                    println!("   r ⏎  hot reload   R ⏎  hot restart   q ⏎  quit");
+                    continue;
+                }
+            },
+        };
+        let sources = sources_hash(&app.dir);
+        if saved && sources == built_sources {
+            continue;
+        }
+        built_sources = sources;
+        reload(mode);
+    }
+    println!("→ stopped hot reload (the app keeps running)");
+    Ok(())
+}
+
+fn reload(
+    app: &AppCrate,
+    server: &DevServer,
+    build: &mut impl FnMut() -> Result<PathBuf>,
+    types: &mut types::Fingerprint,
+    mode: Mode,
+) {
+    let started = Instant::now();
+    let library = match build() {
+        Ok(library) => library,
+        Err(e) => {
+            println!("✗ build failed ({e:#}): fix the error and save again");
+            return;
+        }
+    };
+    let new_types = types::fingerprint(&app.dir);
+    let mut keep_state = mode == Mode::Reload;
+    if keep_state && new_types != *types {
+        println!("   type definitions changed → hot restart");
+        keep_state = false;
+    }
+    *types = new_types;
+
+    let result = std::fs::read(&library)
+        .with_context(|| format!("reading {}", library.display()))
+        .and_then(|bytes| server.send(if keep_state { "reload" } else { "restart" }, &bytes));
+    let ms = started.elapsed().as_millis();
+    match result {
+        Ok(report) => match report.strip_prefix("ok ") {
+            Some(report) => println!("✓ {report} ({ms} ms)"),
+            None => println!("✗ {}", report.trim_start_matches("err ")),
+        },
+        Err(e) => println!("✗ {e:#}: is the app still running?"),
+    }
+}
+
+/// Hash of the app's sources (`src/**/*.rs`) and manifest contents.
+fn sources_hash(app_dir: &Path) -> u64 {
+    fn visit(dir: &Path, files: &mut Vec<PathBuf>) {
+        for entry in std::fs::read_dir(dir).into_iter().flatten().flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                visit(&path, files);
+            } else if path.extension().is_some_and(|e| e == "rs") {
+                files.push(path);
+            }
+        }
+    }
+    let mut files = vec![app_dir.join("Cargo.toml")];
+    visit(&app_dir.join("src"), &mut files);
+    files.sort();
+    let mut hasher = DefaultHasher::new();
+    for file in files {
+        file.hash(&mut hasher);
+        std::fs::read(&file).unwrap_or_default().hash(&mut hasher);
+    }
+    hasher.finish()
+}
+
+/// Watches the app's sources and manifest.
+fn watch(app_dir: &Path, tx: mpsc::Sender<Input>) -> Result<notify::RecommendedWatcher> {
+    let mut watcher = notify::recommended_watcher(move |event: notify::Result<notify::Event>| {
+        let Ok(event) = event else { return };
+        let relevant = matches!(
+            event.kind,
+            EventKind::Create(_) | EventKind::Modify(_) | EventKind::Remove(_)
+        ) && event.paths.iter().any(|p| {
+            p.extension().is_some_and(|e| e == "rs")
+                || p.file_name().is_some_and(|n| n == "Cargo.toml")
+        });
+        if relevant {
+            let _ = tx.send(Input::Changed);
+        }
+    })
+    .context("watching the app's files")?;
+    watcher.watch(&app_dir.join("src"), RecursiveMode::Recursive)?;
+    watcher.watch(&app_dir.join("Cargo.toml"), RecursiveMode::NonRecursive)?;
+    Ok(watcher)
+}
+
+/// Reads commands from stdin (one per line).
+fn read_keys(tx: mpsc::Sender<Input>) {
+    std::thread::spawn(move || {
+        for line in std::io::stdin().lines() {
+            let Ok(line) = line else { break };
+            if tx.send(Input::Key(line.trim().to_owned())).is_err() {
+                break;
+            }
+        }
+    });
+}
