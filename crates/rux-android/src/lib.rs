@@ -8,14 +8,16 @@
 //!
 //! All calls happen on Android's main (UI) thread.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
+use std::ffi::{CStr, c_char, c_void};
 
 pub use jni;
-use jni::JNIEnv;
 use jni::objects::{GlobalRef, JObject, JString, JValue};
-use jni::sys::jlong;
+use jni::sys::{jlong, jstring};
+use jni::{JNIEnv, JavaVM};
 use rux_core::{App, Event, EventKind, Mutation, NodeId};
-use rux_platform::{Renderer, Runtime, host};
+use rux_platform::{Renderer, Runtime, dev, host};
+use rux_state::hot::HotSignal;
 
 thread_local! {
     /// Global reference to the Kotlin `RuxHost` instance.
@@ -129,6 +131,26 @@ fn with_renderer<R>(env: &mut JNIEnv, f: impl FnOnce(&mut JniRenderer) -> R) -> 
     })
 }
 
+/// Raw handles a hot-reloaded build needs to render (see `rux_platform::dev`).
+#[repr(C)]
+struct HostHandle {
+    vm: *mut jni::sys::JavaVM,
+    host: jni::sys::jobject,
+}
+
+thread_local! {
+    /// In a hot-reloaded build: the JVM, to get a `JNIEnv` for events coming through the
+    /// trampoline.
+    static VM: Cell<*mut jni::sys::JavaVM> = const { Cell::new(std::ptr::null_mut()) };
+}
+
+/// The handle to pass to a hot-reloaded build: this thread's JVM + the `RuxHost` global ref.
+fn host_handle(env: &JNIEnv) -> Option<HostHandle> {
+    let vm = env.get_java_vm().ok()?.get_java_vm_pointer();
+    let host = HOST.with(|h| h.borrow().as_ref().map(|g| g.as_obj().as_raw()))?;
+    Some(HostHandle { vm, host })
+}
+
 /// Starts the app. Called from `RuxNative.nativeStart(host)`.
 pub fn start(mut env: JNIEnv, host: JObject, create_app: fn() -> Box<dyn App>) {
     host::guard("nativeStart", || {
@@ -140,8 +162,19 @@ pub fn start(mut env: JNIEnv, host: JObject, create_app: fn() -> Box<dyn App>) {
             }
         };
         HOST.with(|h| *h.borrow_mut() = Some(global));
-        let runtime = Runtime::new(create_app());
-        with_renderer(&mut env, |r| host::install(runtime, r));
+        // After a hot reload (e.g. the Activity is recreated), keep running the newest build.
+        if let Some(lib) = dev::active() {
+            let Some(handle) = host_handle(&env) else {
+                return;
+            };
+            // SAFETY: `handle` is this backend's host handle and outlives the call.
+            if let Err(e) = unsafe { lib.start(&raw const handle as *const c_void, Vec::new()) } {
+                eprintln!("[rux] {e}");
+            }
+            return;
+        }
+        let (app, _) = dev::create_app(create_app, Vec::new());
+        with_renderer(&mut env, |r| host::install(Runtime::new(app), r));
     });
 }
 
@@ -151,24 +184,131 @@ pub fn dispatch(mut env: JNIEnv, id: jlong, event: JString, value: JString) {
         let Ok(event) = env.get_string(&event).map(String::from) else {
             return;
         };
-        let Some(kind) = EventKind::parse(&event) else {
-            eprintln!("[rux] unknown event {event:?}");
-            return;
-        };
         let value = if value.is_null() {
             None
         } else {
             env.get_string(&value).ok().map(String::from)
         };
-        let event = Event { kind, value };
-        with_renderer(&mut env, |r| host::dispatch(NodeId(id as u64), &event, r));
+        match dev::active() {
+            Some(lib) => lib.dispatch(id as u64, &event, value.as_deref()),
+            None => dispatch_event(&mut env, id as u64, &event, value),
+        }
     });
+}
+
+fn dispatch_event(env: &mut JNIEnv, id: u64, event: &str, value: Option<String>) {
+    let Some(kind) = EventKind::parse(event) else {
+        eprintln!("[rux] unknown event {event:?}");
+        return;
+    };
+    let event = Event { kind, value };
+    with_renderer(env, |r| host::dispatch(NodeId(id), &event, r));
 }
 
 /// Tears down the runtime. Called from `RuxNative.nativeStop()` (Activity.onDestroy).
 pub fn stop() {
     host::guard("nativeStop", || {
-        host::uninstall();
+        match dev::active() {
+            Some(lib) => drop(lib.stop()),
+            None => host::uninstall(),
+        }
         HOST.with(|h| h.borrow_mut().take());
     });
+}
+
+/// Hot reload (`keep_state`) / hot restart to the build at `path`. Called from
+/// `RuxNative.nativeReload(path, keepState)` by the dev client (debug builds).
+pub fn reload(mut env: JNIEnv, path: JString, keep_state: bool) -> jstring {
+    let report = host::guard("nativeReload", || {
+        let path: String = env.get_string(&path).map(Into::into).unwrap_or_default();
+        let Some(handle) = host_handle(&env) else {
+            return "err the app is not running".to_owned();
+        };
+        // SAFETY: `handle` is this backend's host handle and outlives the call.
+        unsafe {
+            dev::reload(
+                &path,
+                keep_state,
+                &raw const handle as *const c_void,
+                || {
+                    with_renderer(&mut env, |r| host::teardown(r));
+                },
+            )
+        }
+    })
+    .unwrap_or_else(|| "err panic while reloading (see logcat)".into());
+    env.new_string(report)
+        .map(|s| s.into_raw())
+        .unwrap_or(std::ptr::null_mut())
+}
+
+// --- exported by every build, called by the trampoline (see `rux_platform::dev`) ---
+
+/// `rux_dev_start`: start the app in this build on the trampoline's host.
+///
+/// # Safety
+/// `handle` must point to a [`HostHandle`]; see [`dev::export_start`] for the rest.
+pub unsafe fn dev_start(
+    handle: *const c_void,
+    prev: *const HotSignal,
+    prev_len: usize,
+    msg: *mut c_char,
+    msg_cap: usize,
+    create_app: fn() -> Box<dyn App>,
+) -> u32 {
+    unsafe {
+        dev::export_start(prev, prev_len, msg, msg_cap, |previous| {
+            let handle = &*handle.cast::<HostHandle>();
+            VM.with(|v| v.set(handle.vm));
+            let vm = JavaVM::from_raw(handle.vm).expect("JavaVM");
+            let mut env = vm.get_env().expect("JNIEnv on the UI thread");
+            // The trampoline keeps its own global ref alive; take ours for this build.
+            let host = JObject::from_raw(handle.host);
+            let global = env.new_global_ref(&host).expect("RuxHost global ref");
+            HOST.with(|h| *h.borrow_mut() = Some(global));
+            let (app, started) = dev::create_app(create_app, previous);
+            with_renderer(&mut env, |r| host::install(Runtime::new(app), r));
+            started
+        })
+    }
+}
+
+/// `rux_dev_dispatch`: an event forwarded by the trampoline.
+///
+/// # Safety
+/// `event` must be a valid C string; `value` a valid C string or null.
+pub unsafe fn dev_dispatch(id: u64, event: *const c_char, value: *const c_char) {
+    host::guard("rux_dev_dispatch", || {
+        let event = unsafe { CStr::from_ptr(event) }.to_string_lossy();
+        let value = (!value.is_null()).then(|| {
+            unsafe { CStr::from_ptr(value) }
+                .to_string_lossy()
+                .into_owned()
+        });
+        let Some(mut env) = vm_env() else { return };
+        dispatch_event(&mut env, id, &event, value);
+    });
+}
+
+/// `rux_dev_stop`: tear the app down, returning its signals.
+///
+/// # Safety
+/// `len` must be valid for writes.
+pub unsafe fn dev_stop(len: *mut usize) -> *const HotSignal {
+    unsafe {
+        dev::export_stop(len, || {
+            if let Some(mut env) = vm_env() {
+                with_renderer(&mut env, |r| host::teardown(r));
+            }
+            HOST.with(|h| h.borrow_mut().take());
+        })
+    }
+}
+
+fn vm_env() -> Option<JNIEnv<'static>> {
+    let vm = VM.with(Cell::get);
+    // SAFETY: set from the trampoline's JavaVM, which lives for the whole process.
+    let vm = unsafe { JavaVM::from_raw(vm) }.ok()?;
+    let vm: &'static JavaVM = Box::leak(Box::new(vm));
+    vm.get_env().ok()
 }

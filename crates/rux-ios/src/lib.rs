@@ -10,11 +10,12 @@
 //!
 //! All calls happen on the main thread.
 
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::ffi::{CStr, CString, c_char, c_void};
 
 use rux_core::{App, Event, EventKind, Mutation, NodeId};
-use rux_platform::{Renderer, Runtime, host};
+use rux_platform::{Renderer, Runtime, dev, host};
+use rux_state::hot::HotSignal;
 
 type Ctx = *mut c_void;
 
@@ -97,7 +98,16 @@ impl Renderer for VTableRenderer {
 pub fn start(vtable: RuxHostVTable, create_app: fn() -> Box<dyn App>) {
     host::guard("rux_start", || {
         VTABLE.with(|v| v.set(Some(vtable)));
-        host::install(Runtime::new(create_app()), &mut VTableRenderer(vtable));
+        // After a hot reload, keep running the newest build.
+        if let Some(lib) = dev::active() {
+            // SAFETY: `vtable` is this backend's host handle and outlives the call.
+            if let Err(e) = unsafe { lib.start(&raw const vtable as *const c_void, Vec::new()) } {
+                eprintln!("[rux] {e}");
+            }
+            return;
+        }
+        let (app, _) = dev::create_app(create_app, Vec::new());
+        host::install(Runtime::new(app), &mut VTableRenderer(vtable));
     });
 }
 
@@ -107,34 +117,133 @@ pub fn start(vtable: RuxHostVTable, create_app: fn() -> Box<dyn App>) {
 /// `event` must be a valid C string; `value` must be a valid C string or NULL.
 pub unsafe fn dispatch(id: u64, event: *const c_char, value: *const c_char) {
     host::guard("rux_dispatch", || {
-        let Some(vtable) = VTABLE.with(Cell::get) else {
-            return;
-        };
         if event.is_null() {
             return;
         }
         let event = unsafe { CStr::from_ptr(event) }.to_string_lossy();
-        let Some(kind) = EventKind::parse(&event) else {
-            eprintln!("[rux] unknown event {event:?}");
-            return;
-        };
         let value = (!value.is_null()).then(|| {
             unsafe { CStr::from_ptr(value) }
                 .to_string_lossy()
                 .into_owned()
         });
-        host::dispatch(
-            NodeId(id),
-            &Event { kind, value },
-            &mut VTableRenderer(vtable),
-        );
+        match dev::active() {
+            Some(lib) => lib.dispatch(id, &event, value.as_deref()),
+            None => dispatch_event(id, &event, value),
+        }
     });
+}
+
+fn dispatch_event(id: u64, event: &str, value: Option<String>) {
+    let Some(vtable) = VTABLE.with(Cell::get) else {
+        return;
+    };
+    let Some(kind) = EventKind::parse(event) else {
+        eprintln!("[rux] unknown event {event:?}");
+        return;
+    };
+    host::dispatch(
+        NodeId(id),
+        &Event { kind, value },
+        &mut VTableRenderer(vtable),
+    );
 }
 
 /// Tears down the runtime. Called from `rux_stop()`.
 pub fn stop() {
     host::guard("rux_stop", || {
-        host::uninstall();
+        match dev::active() {
+            Some(lib) => drop(lib.stop()),
+            None => host::uninstall(),
+        }
         VTABLE.with(|v| v.set(None));
     });
+}
+
+thread_local! {
+    /// Keeps the last `rux_reload` report alive for the caller.
+    static REPORT: RefCell<CString> = RefCell::new(CString::default());
+}
+
+/// Hot reload (`keep_state`) / hot restart to the build at `path`. Called from `rux_reload`
+/// by the dev client (debug builds). The returned string is valid until the next call.
+///
+/// # Safety
+/// `path` must be a valid C string.
+pub unsafe fn reload(path: *const c_char, keep_state: bool) -> *const c_char {
+    let report = host::guard("rux_reload", || {
+        let path = unsafe { CStr::from_ptr(path) }.to_string_lossy();
+        let Some(vtable) = VTABLE.with(Cell::get) else {
+            return "err the app is not running".to_owned();
+        };
+        // SAFETY: `vtable` is this backend's host handle and outlives the call.
+        unsafe {
+            dev::reload(
+                &path,
+                keep_state,
+                &raw const vtable as *const c_void,
+                || host::teardown(&mut VTableRenderer(vtable)),
+            )
+        }
+    })
+    .unwrap_or_else(|| "err panic while reloading".into());
+    REPORT.with(|r| {
+        *r.borrow_mut() = cstr(&report);
+        r.borrow().as_ptr()
+    })
+}
+
+// --- exported by every build, called by the trampoline (see `rux_platform::dev`) ---
+
+/// `rux_dev_start`: start the app in this build on the trampoline's host.
+///
+/// # Safety
+/// `handle` must point to a [`RuxHostVTable`]; see [`dev::export_start`] for the rest.
+pub unsafe fn dev_start(
+    handle: *const c_void,
+    prev: *const HotSignal,
+    prev_len: usize,
+    msg: *mut c_char,
+    msg_cap: usize,
+    create_app: fn() -> Box<dyn App>,
+) -> u32 {
+    unsafe {
+        dev::export_start(prev, prev_len, msg, msg_cap, |previous| {
+            let vtable = *handle.cast::<RuxHostVTable>();
+            VTABLE.with(|v| v.set(Some(vtable)));
+            let (app, started) = dev::create_app(create_app, previous);
+            host::install(Runtime::new(app), &mut VTableRenderer(vtable));
+            started
+        })
+    }
+}
+
+/// `rux_dev_dispatch`: an event forwarded by the trampoline.
+///
+/// # Safety
+/// `event` must be a valid C string; `value` a valid C string or null.
+pub unsafe fn dev_dispatch(id: u64, event: *const c_char, value: *const c_char) {
+    host::guard("rux_dev_dispatch", || {
+        let event = unsafe { CStr::from_ptr(event) }.to_string_lossy();
+        let value = (!value.is_null()).then(|| {
+            unsafe { CStr::from_ptr(value) }
+                .to_string_lossy()
+                .into_owned()
+        });
+        dispatch_event(id, &event, value);
+    });
+}
+
+/// `rux_dev_stop`: tear the app down, returning its signals.
+///
+/// # Safety
+/// `len` must be valid for writes.
+pub unsafe fn dev_stop(len: *mut usize) -> *const HotSignal {
+    unsafe {
+        dev::export_stop(len, || {
+            if let Some(vtable) = VTABLE.with(Cell::get) {
+                host::teardown(&mut VTableRenderer(vtable));
+            }
+            VTABLE.with(|v| v.set(None));
+        })
+    }
 }

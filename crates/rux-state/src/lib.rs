@@ -10,6 +10,8 @@ use std::cell::{Cell, Ref, RefCell};
 use std::fmt;
 use std::rc::Rc;
 
+pub mod hot;
+
 thread_local! {
     static DIRTY: Cell<bool> = const { Cell::new(false) };
 }
@@ -31,7 +33,7 @@ pub struct Signal<T>(Rc<RefCell<T>>);
 
 impl<T> Signal<T> {
     pub fn new(value: T) -> Self {
-        Self(Rc::new(RefCell::new(value)))
+        Self(hot::new_cell(value))
     }
 
     /// Borrows the value for reading.

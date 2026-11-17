@@ -1,6 +1,6 @@
 [package]
 name = "rux-example-counter"
-version = "0.1.0"
+version = "0.1.0+1"
 edition.workspace = true
 publish = false
 
@@ -16,3 +16,6 @@ rux.workspace = true
 [package.metadata.rux]
 android-project = "android"
 ios-project = "ios"
+# Android applicationId + iOS bundle identifier. Override per platform with
+# `android-app-id` / `ios-bundle-id` if they differ.
+app-id = "dev.rux.examples.counter"

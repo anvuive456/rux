@@ -5,7 +5,7 @@ members = ["crates/*", "examples/*"]
 [workspace.package]
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.85"
+rust-version = "1.100"
 license = "MIT OR Apache-2.0"
 
 [workspace.dependencies]
@@ -23,6 +23,10 @@ clap = { version = "4", features = ["derive"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 toml = "0.8"
+libloading = "0.8"
+notify = "8"
+syn = { version = "2", features = ["full"] }
+quote = "1"
 
 # ---------------------------------------------------------------------------
 # `rux` — the facade crate that user apps depend on.

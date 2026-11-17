@@ -19,4 +19,10 @@ object RuxNative {
     @JvmStatic external fun nativeStart(host: RuxHost)
     @JvmStatic external fun nativeDispatch(id: Long, event: String, value: String?)
     @JvmStatic external fun nativeStop()
+
+    /**
+     * Debug builds only: hands the app over to the library build at [path] — hot reload when
+     * [keepState], hot restart otherwise. Returns a one-line report (`ok …` / `err …`).
+     */
+    @JvmStatic external fun nativeReload(path: String, keepState: Boolean): String
 }

@@ -4,6 +4,7 @@
 //! 1. Implement [`Renderer`] — apply a list of [`Mutation`]s to native widgets.
 //! 2. Call [`host::install`] on app start and [`host::dispatch`] on native events.
 
+pub mod dev;
 pub mod host;
 pub mod testing;
 
@@ -32,6 +33,14 @@ impl Runtime {
     pub fn render(&mut self, renderer: &mut dyn Renderer) {
         rux_state::take_dirty();
         let mutations = self.reconciler.render(self.app.view());
+        if !mutations.is_empty() {
+            renderer.apply(&mutations);
+        }
+    }
+
+    /// Releases every native node (before handing over to a hot-reloaded build).
+    pub fn teardown(&mut self, renderer: &mut dyn Renderer) {
+        let mutations = self.reconciler.clear();
         if !mutations.is_empty() {
             renderer.apply(&mutations);
         }

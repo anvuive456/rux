@@ -36,6 +36,13 @@ pub fn dispatch(id: NodeId, event: &Event, renderer: &mut dyn Renderer) -> bool 
     })
 }
 
+/// Releases the runtime's native nodes and drops it (hot reload hands over to a new build).
+pub fn teardown(renderer: &mut dyn Renderer) {
+    if let Some(mut runtime) = RUNTIME.with(|rt| rt.borrow_mut().take()) {
+        runtime.teardown(renderer);
+    }
+}
+
 /// Tears down the runtime (Activity/Scene destroyed).
 pub fn uninstall() {
     RUNTIME.with(|rt| rt.borrow_mut().take());

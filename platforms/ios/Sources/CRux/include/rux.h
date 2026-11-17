@@ -4,6 +4,7 @@
 #ifndef RUX_H
 #define RUX_H
 
+#include <stdbool.h>
 #include <stdint.h>
 
 #pragma clang assume_nonnull begin
@@ -31,6 +32,11 @@ void rux_dispatch(uint64_t id, const char *event, const char *_Nullable value);
 
 /// Tears down the Rust app.
 void rux_stop(void);
+
+/// Debug builds only: hands the app over to the library build at `path` — hot reload when
+/// `keep_state`, hot restart otherwise. Returns a one-line report (`ok …` / `err …`), valid
+/// until the next call.
+const char *rux_reload(const char *path, bool keep_state);
 
 #pragma clang assume_nonnull end
 

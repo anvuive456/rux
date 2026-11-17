@@ -9,4 +9,5 @@ license.workspace = true
 [dependencies]
 rux-core.workspace = true
 rux-platform.workspace = true
+rux-state.workspace = true
 jni.workspace = true

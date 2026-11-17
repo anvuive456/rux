@@ -56,6 +56,17 @@ impl Reconciler {
         }
     }
 
+    /// Unmounts everything; returns the mutations releasing every node on the host. The host
+    /// keeps showing the old root until a new one is set (no flicker on hot reload).
+    pub fn clear(&mut self) -> Vec<Mutation> {
+        let mut out = Vec::new();
+        if let Some(root) = self.root.take() {
+            self.unmount(root, &mut out);
+        }
+        self.handlers.clear();
+        out
+    }
+
     pub fn root_id(&self) -> Option<NodeId> {
         self.root.as_ref().map(|r| r.id)
     }
@@ -248,6 +259,23 @@ mod tests {
 
     fn column(children: impl IntoIterator<Item = Element>) -> Element {
         Element::new(ElementKind::Column).children(children)
+    }
+
+    #[test]
+    fn clear_releases_every_node() {
+        let mut r = Reconciler::new();
+        r.render(column([text("a"), text("b")]));
+        let muts = r.clear();
+        assert_eq!(
+            muts,
+            vec![
+                Mutation::Release { id: NodeId(2) },
+                Mutation::Release { id: NodeId(3) },
+                Mutation::Release { id: NodeId(1) },
+            ]
+        );
+        assert_eq!(r.root_id(), None);
+        assert!(r.clear().is_empty());
     }
 
     #[test]
