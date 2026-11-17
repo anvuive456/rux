@@ -9,7 +9,9 @@ public final class RuxHost {
     private var nodes: [UInt64: UIView] = [:]
     private var actions: [UInt64: [String: UIAction]] = [:]
     private weak var container: UIView?
-    private var rootId: UInt64?
+    /// The view shown in the container. Kept as a view (not an id): on hot reload the old tree is
+    /// released before the new root, which may reuse the old root's id, is set.
+    private var rootView: UIView?
 
     /// true while dispatching / applying mutations — suppresses synchronously fired events.
     private var applying = false
@@ -58,10 +60,18 @@ public final class RuxHost {
     func createNode(_ id: UInt64, _ kind: String) {
         let view: UIView
         switch kind {
-        case "column", "row":
+        case "column":
             let stack = UIStackView()
-            stack.axis = kind == "column" ? .vertical : .horizontal
-            stack.alignment = kind == "column" ? .fill : .center
+            stack.axis = .vertical
+            stack.alignment = .fill
+            view = stack
+        case "row":
+            // Children keep their natural width, packed at the start (like Android's
+            // WRAP_CONTENT): a flexible spacer after them takes the remaining width.
+            let stack = UIStackView()
+            stack.axis = .horizontal
+            stack.alignment = .center
+            stack.addArrangedSubview(RowSpacer())
             view = stack
         case "scroll":
             view = UIScrollView()
@@ -104,7 +114,9 @@ public final class RuxHost {
         c.removeFromSuperview()
         switch p {
         case let stack as UIStackView:
-            stack.insertArrangedSubview(c, at: min(index, stack.arrangedSubviews.count))
+            // Keep a row's spacer last.
+            let count = stack.arrangedSubviews.filter { !($0 is RowSpacer) }.count
+            stack.insertArrangedSubview(c, at: min(index, count))
         case let scroll as UIScrollView:
             c.translatesAutoresizingMaskIntoConstraints = false
             scroll.addSubview(c)
@@ -135,8 +147,8 @@ public final class RuxHost {
 
     func setRoot(_ id: UInt64) {
         guard let container, let root = nodes[id] else { return }
-        if let old = rootId.flatMap({ nodes[$0] }) { old.removeFromSuperview() }
-        rootId = id
+        if let old = rootView, old !== root { old.removeFromSuperview() }
+        rootView = root
         root.removeFromSuperview()
         root.translatesAutoresizingMaskIntoConstraints = false
         container.addSubview(root)
@@ -248,4 +260,15 @@ public final class RuxHost {
             alpha: CGFloat((argb >> 24) & 0xFF) / 255
         )
     }
+}
+
+/// Trailing filler of a `row` stack: absorbs the extra width instead of the children.
+private final class RowSpacer: UIView {
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        setContentHuggingPriority(.fittingSizeLevel, for: .horizontal)
+        setContentCompressionResistancePriority(.fittingSizeLevel, for: .horizontal)
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 }
