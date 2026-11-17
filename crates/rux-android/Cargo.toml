@@ -1,0 +1,12 @@
+[package]
+name = "rux-android"
+description = "Android backend for rux: applies mutations to android.view.View via JNI."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+rux-core.workspace = true
+rux-platform.workspace = true
+jni.workspace = true

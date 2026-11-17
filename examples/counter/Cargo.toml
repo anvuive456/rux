@@ -1,0 +1,18 @@
+[package]
+name = "rux-example-counter"
+version = "0.1.0"
+edition.workspace = true
+publish = false
+
+[lib]
+# Native library name: libcounter.so (Android) / libcounter.a (iOS).
+name = "counter"
+crate-type = ["lib", "cdylib", "staticlib"]
+
+[dependencies]
+rux.workspace = true
+
+# Configuration for the `rux` CLI.
+[package.metadata.rux]
+android-project = "android"
+ios-project = "ios"

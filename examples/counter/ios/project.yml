@@ -1,0 +1,26 @@
+# Generate the Xcode project: `xcodegen` (brew install xcodegen)
+# Requires running `rux build ios` first to produce target/ios/counter.xcframework.
+name: RuxCounter
+options:
+  bundleIdPrefix: dev.rux.examples
+  deploymentTarget:
+    iOS: "15.0"
+
+packages:
+  RuxRuntime:
+    path: ../../../platforms/ios
+
+targets:
+  RuxCounter:
+    type: application
+    platform: iOS
+    sources: [Sources]
+    info:
+      path: Sources/Info.plist
+      properties:
+        UILaunchScreen: {}
+        CFBundleDisplayName: Rux Counter
+    dependencies:
+      - package: RuxRuntime
+      - framework: ../../../target/ios/counter.xcframework
+        embed: false

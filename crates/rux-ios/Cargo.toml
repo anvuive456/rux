@@ -1,0 +1,11 @@
+[package]
+name = "rux-ios"
+description = "iOS backend for rux: applies mutations to UIKit through a C vtable provided by Swift."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+rux-core.workspace = true
+rux-platform.workspace = true

@@ -1,0 +1,10 @@
+[package]
+name = "rux-platform"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+rux-core.workspace = true
+rux-state.workspace = true

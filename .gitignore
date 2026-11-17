@@ -1,0 +1,23 @@
+# Rust
+/target
+
+# Android
+.gradle/
+build/
+local.properties
+.idea/
+*.iml
+**/src/main/jniLibs/
+
+# iOS / Xcode
+*.xcodeproj/
+*.xcworkspace/
+xcuserdata/
+DerivedData/
+.build/
+.swiftpm/
+**/Sources/Info.plist
+
+# OS
+.DS_Store
+Thumbs.db

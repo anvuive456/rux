@@ -1,0 +1,53 @@
+[workspace]
+resolver = "3"
+members = ["crates/*", "examples/*"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+license = "MIT OR Apache-2.0"
+
+[workspace.dependencies]
+rux = { path = ".", version = "0.1.0" }
+rux-core = { path = "crates/rux-core", version = "0.1.0" }
+rux-state = { path = "crates/rux-state", version = "0.1.0" }
+rux-ui = { path = "crates/rux-ui", version = "0.1.0" }
+rux-platform = { path = "crates/rux-platform", version = "0.1.0" }
+rux-android = { path = "crates/rux-android", version = "0.1.0" }
+rux-ios = { path = "crates/rux-ios", version = "0.1.0" }
+
+jni = "0.21"
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.8"
+
+# ---------------------------------------------------------------------------
+# `rux` — the facade crate that user apps depend on.
+# ---------------------------------------------------------------------------
+[package]
+name = "rux"
+description = "Write UI once in Rust, render with each platform's native widgets."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+rux-core.workspace = true
+rux-state.workspace = true
+rux-ui.workspace = true
+rux-platform.workspace = true
+
+[target.'cfg(target_os = "android")'.dependencies]
+rux-android.workspace = true
+
+[target.'cfg(target_os = "ios")'.dependencies]
+rux-ios.workspace = true
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true
