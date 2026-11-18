@@ -16,6 +16,7 @@ const DEFAULT_ABI: &str = "arm64-v8a";
 
 pub fn build(app: &AppCrate, release: bool, abis: &[String]) -> Result<()> {
     let project = super::project_dir(app)?;
+    crate::sdk::ensure(&app.dir)?;
     // Found in (or installed into) the SDK, so ANDROID_NDK_HOME is optional.
     let ndk = ensure_ndk(app.meta.android_ndk_version.as_deref())?;
     let deps = Deps::load(app)?;

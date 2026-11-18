@@ -13,6 +13,7 @@ pub fn build(app: &AppCrate, release: bool) -> Result<()> {
     if !cfg!(target_os = "macos") {
         bail!("building for iOS requires macOS + Xcode");
     }
+    crate::sdk::ensure(&app.dir)?;
     if let Some(project) = super::project_dir(app) {
         write_config(&project, app)?;
         let deps = Deps::load(app)?;

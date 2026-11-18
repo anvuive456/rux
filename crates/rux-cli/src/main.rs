@@ -3,6 +3,7 @@
 //! Run inside the app crate directory (where `Cargo.toml` has `[package.metadata.rux]`):
 //!
 //! ```text
+//! rux setup [--no-modify-path]
 //! rux new <dir> [--name <package>] [--app-id <id>]
 //! rux doctor
 //! rux build android [--release] [--abi arm64-v8a --abi x86_64]
@@ -24,9 +25,11 @@ mod app_id;
 mod deps;
 mod doctor;
 mod hot;
+mod install;
 mod ios;
 mod native;
 mod new;
+mod sdk;
 mod util;
 mod version;
 
@@ -60,6 +63,13 @@ enum Cmd {
         /// Application id for Android and iOS. Default: `com.example.<name>`.
         #[arg(long)]
         app_id: Option<String>,
+    },
+    /// Install `rux` in ~/.rux/bin and put it on PATH, install the rux library (SDK) of this
+    /// CLI's version, and link it into the app in the current directory (or --path) if any.
+    Setup {
+        /// Don't change PATH (the shell startup files / the user `Path` on Windows).
+        #[arg(long)]
+        no_modify_path: bool,
     },
     /// Check the required toolchains.
     Doctor,
@@ -113,6 +123,7 @@ fn main() -> Result<()> {
         Cmd::New { dir, name, app_id } => {
             new::run(&cli.path.join(dir), name.as_deref(), app_id.as_deref())
         }
+        Cmd::Setup { no_modify_path } => sdk::setup(&cli.path, !no_modify_path),
         Cmd::Doctor => doctor::run(),
         Cmd::Build { platform, opts } => {
             let app = AppCrate::load(&cli.path)?;

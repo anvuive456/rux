@@ -54,7 +54,7 @@ remove_child / release / set_root / listen) and `Event`. Adding a platform means
 | `crates/rux-ios`                | iOS backend: calls a C vtable provided by Swift |
 | `crates/rux-native`             | Calling native code: codec, sync / async calls, test mocks (`rux::native`) |
 | `crates/rux-macros`             | `#[rux::host_api]`, `#[rux::async_call]`, `#[derive(NativeType)]` |
-| `crates/rux-cli`                | The `rux` CLI: `new`, `doctor`, `build`, `run` (android / ios), native API codegen |
+| `crates/rux-cli`                | The `rux` CLI (embeds the SDK): `setup`, `new`, `doctor`, `build`, `run` (android / ios), native API codegen |
 | `platforms/android/rux-runtime` | Shared Android library (Kotlin): `RuxNative`, `RuxHost` |
 | `platforms/ios`                 | Swift package `RuxRuntime`: `rux.h` + `RuxHost` |
 | `examples/counter`              | Sample app + Android / iOS projects |
@@ -85,11 +85,64 @@ examples/counter/
 
 ## Getting started
 
+### Install the `rux` CLI
+
+Download the archive for your platform from the
+[latest release](https://github.com/anvuive456/rux/releases/latest) (macOS arm64 / x64, Linux
+x64 / arm64, Windows x64), extract it anywhere, and run its `setup`:
+
 ```sh
-cargo test --workspace                 # runs all tests, including the headless UI tests in examples/counter
-cargo install --path crates/rux-cli    # installs the `rux` CLI
-rux doctor                             # checks your toolchains
+# macOS (Apple silicon); other archives: rux-x86_64-apple-darwin.tar.gz,
+# rux-x86_64-unknown-linux-musl.tar.gz, rux-aarch64-unknown-linux-musl.tar.gz
+curl -fsSL https://github.com/anvuive456/rux/releases/latest/download/rux-aarch64-apple-darwin.tar.gz | tar -xz
+./rux setup
 ```
+
+```powershell
+# Windows
+Invoke-WebRequest https://github.com/anvuive456/rux/releases/latest/download/rux-x86_64-pc-windows-msvc.zip -OutFile rux.zip
+Expand-Archive rux.zip -DestinationPath rux
+.\rux\rux.exe setup
+```
+
+`rux setup`, like rustup:
+
+- installs `rux` in `~/.rux/bin` (the downloaded file can then go) and puts that directory on your
+  PATH: the user `Path` on Windows; on macOS / Linux, a line sourcing `~/.rux/env` in `~/.profile`,
+  `~/.bashrc`, `~/.zshenv` (bash / zsh) and `~/.config/fish/conf.d/rux.fish` (fish). Open a new
+  terminal afterwards. `--no-modify-path` leaves PATH alone;
+- installs the rux library (the SDK) of the CLI's version in `~/.rux/sdk/<version>` (see below).
+
+`$RUX_HOME` replaces `~/.rux`. Every release lists the archives' checksums in `SHA256SUMS`. On
+macOS, an archive downloaded with a browser is quarantined: run `xattr -d com.apple.quarantine rux`
+first.
+
+Or build it from source: `cargo install --path crates/rux-cli`, then `rux setup` (it doesn't copy
+a `rux` that's already on PATH).
+
+Then check your toolchains:
+
+```sh
+rux doctor
+```
+
+### One version: the CLI and the SDK
+
+Like Flutter's SDK, rux isn't published to a package registry: the `rux` CLI embeds the rux SDK
+(the `rux` crate, the crates it depends on and the Android / iOS runtimes) of its own version, so
+the tool and the library can't drift apart. `rux setup` installs it in `~/.rux/sdk/<version>` (or
+`$RUX_HOME/sdk/<version>`), and links it into an app as `.rux/sdk` (gitignored), which the app
+depends on:
+
+```toml
+[dependencies]
+rux = { version = "=0.2.0", path = ".rux/sdk" }
+```
+
+- `rux new` does this for you; after cloning an app, run `rux setup` once (like `flutter pub get`).
+- `rux build` / `rux run` relink the SDK when it's missing or outdated.
+- The app states its rux version: a `rux` CLI of another version refuses to build it and says
+  which release to install, or how to move the app to the CLI's version (change `=0.2.0`).
 
 ### New app
 
@@ -104,16 +157,9 @@ The app has the same layout as `examples/counter` (see [App layout](#app-layout)
 `--name <package>` (default: the directory's name), `--app-id <id>` (default:
 `com.example.<name>`).
 
-The app depends on rux like on any crate (from git until rux is on crates.io), and no rux checkout
-is needed: the Android / iOS runtimes ship inside the `rux` crate, and `rux build` takes them from
-the one cargo resolved for the app (written to `android/rux.properties` and `ios/rux.yml`), so
-they always match the Rust side. To try an app against a local rux checkout, patch it in the app's
-`Cargo.toml`:
-
-```toml
-[patch."https://github.com/anvuive456/rux"]
-rux = { path = "../rux" }
-```
+The app uses the rux SDK of the CLI's version (see above). `rux build` takes the Android / iOS
+runtimes from the `rux` crate cargo resolved for the app (written to `android/rux.properties` and
+`ios/rux.yml`), so they always match the Rust side.
 
 ### Android
 
@@ -299,6 +345,25 @@ git switch -c feat/my-feature
 git push -u origin feat/my-feature
 gh pr create
 ```
+
+```sh
+cargo test --workspace                 # runs all tests, including the headless UI tests in examples/counter
+```
+
+### Releasing
+
+1. Bump `version` in `[workspace.package]` (root `Cargo.toml`) through a pull request.
+2. Once it's merged, tag `main` with the same version and push the tag:
+
+   ```sh
+   git switch main && git pull
+   git tag v0.2.0 && git push origin v0.2.0
+   ```
+
+The [Release workflow](.github/workflows/release.yml) checks that the tag matches the version,
+builds `rux` (embedding the SDK) for macOS (arm64, x64), Linux (x64, arm64; static musl) and
+Windows (x64), smoke-tests it (`rux new` + `cargo check` of the app), and publishes a GitHub Release with the archives, `SHA256SUMS` and
+generated notes. Tags with a suffix (`v0.2.0-beta.1`) become pre-releases.
 
 ## Roadmap
 

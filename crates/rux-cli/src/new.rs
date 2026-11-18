@@ -2,9 +2,8 @@
 //! `examples/counter`: Rust code in `src/`, headless tests in `tests/`, native shells in
 //! `android/` and `ios/`).
 //!
-//! The app depends on the `rux` crate ([`RUX_GIT`] until rux is on crates.io); `rux build` takes
-//! the Android / iOS runtimes from the `rux` crate cargo resolves (see `deps`), so no rux
-//! checkout is needed.
+//! The app depends on the rux SDK of this CLI's version, installed and linked into the app by
+//! `rux setup` (see `sdk`).
 
 use std::path::{Path, PathBuf};
 
@@ -12,9 +11,7 @@ use anyhow::{Context, Result, bail};
 
 use crate::app::AppCrate;
 use crate::app_id::{validate_android_app_id, validate_ios_bundle_id};
-
-/// Where new apps get the `rux` crate from (it isn't on crates.io yet).
-const RUX_GIT: &str = "https://github.com/anvuive456/rux";
+use crate::sdk;
 
 /// `rust-toolchain.toml` of standalone apps: the Rust version rux needs.
 const TOOLCHAIN: &str = include_str!("../templates/app/rust-toolchain.toml.tmpl");
@@ -96,6 +93,11 @@ const TEMPLATE: &[TemplateFile] = &[
 ];
 
 pub fn run(dir: &Path, name: Option<&str>, app_id: Option<&str>) -> Result<()> {
+    run_in(&sdk::home()?, dir, name, app_id)
+}
+
+/// `run` with the SDK installed under `home`.
+fn run_in(home: &Path, dir: &Path, name: Option<&str>, app_id: Option<&str>) -> Result<()> {
     let dir = std::path::absolute(dir).with_context(|| format!("resolving {}", dir.display()))?;
     let existed = dir.exists();
     if existed && std::fs::read_dir(&dir)?.next().is_some() {
@@ -125,20 +127,22 @@ pub fn run(dir: &Path, name: Option<&str>, app_id: Option<&str>) -> Result<()> {
     })?;
 
     std::fs::create_dir_all(&dir).with_context(|| format!("creating {}", dir.display()))?;
-    let result = generate(&dir, &names, &app_id);
+    let result = generate(home, &dir, &names, &app_id);
     if result.is_err() && !existed {
         let _ = std::fs::remove_dir_all(&dir);
     }
     result
 }
 
-fn generate(dir: &Path, names: &Names, app_id: &str) -> Result<()> {
+fn generate(home: &Path, dir: &Path, names: &Names, app_id: &str) -> Result<()> {
     // Real paths: the relative paths written into the project must survive symlinks
     // (e.g. /tmp → /private/tmp on macOS).
     let dir = real_path(dir)?;
     let workspace = enclosing_workspace(&dir)?;
     let target_dir = workspace.as_ref().map_or(&dir, |w| &w.root).join("target");
     let ios_dir = dir.join("ios");
+    // Inside rux's own workspace (e.g. `examples/`), the app uses its `rux`, not the SDK.
+    let uses_sdk = !workspace.as_ref().is_some_and(|w| w.has_rux_dep);
 
     let vars = [
         ("name", names.package.clone()),
@@ -151,11 +155,14 @@ fn generate(dir: &Path, names: &Names, app_id: &str) -> Result<()> {
         ("android_package_dir", app_id.replace('.', "/")),
         (
             "rux_dep",
-            // Inside rux's own workspace (e.g. `examples/`), use its `rux`.
-            if workspace.as_ref().is_some_and(|w| w.has_rux_dep) {
-                "{ workspace = true }".to_owned()
+            if uses_sdk {
+                format!(
+                    "{{ version = \"={}\", path = \"{}\" }}",
+                    sdk::VERSION,
+                    sdk::APP_LINK
+                )
             } else {
-                format!("{{ git = \"{RUX_GIT}\" }}")
+                "{ workspace = true }".to_owned()
             },
         ),
         ("rust_version", env!("CARGO_PKG_RUST_VERSION").to_owned()),
@@ -171,7 +178,9 @@ fn generate(dir: &Path, names: &Names, app_id: &str) -> Result<()> {
             if workspace.is_some() {
                 String::new()
             } else {
-                "\n# A standalone workspace (the app isn't part of an enclosing one).\n[workspace]\n"
+                "\n# A standalone workspace (the app isn't part of an enclosing one). The linked rux SDK\n\
+                 # has its own workspace: keep it out of this one.\n\
+                 [workspace]\nexclude = [\".rux\"]\n"
                     .to_owned()
             },
         ),
@@ -208,8 +217,22 @@ fn generate(dir: &Path, names: &Names, app_id: &str) -> Result<()> {
     app.meta.android_app_id()?;
     app.meta.ios_bundle_id()?;
 
+    if uses_sdk {
+        let (sdk_dir, _) = sdk::install(home)?;
+        sdk::link(&dir, &sdk_dir)?;
+    }
+
     println!("✓ Created {} in {}", names.display, dir.display());
     println!("  app id: {app_id}");
+    if let Some(ws) = workspace.as_ref().filter(|_| uses_sdk) {
+        println!(
+            "\n⚠ {} is inside the Cargo workspace {}: add \"{}/.rux\" to `exclude` in its \
+             [workspace] (the linked rux SDK has its own workspace).",
+            dir.display(),
+            ws.root.display(),
+            relative(&ws.root, &dir),
+        );
+    }
     if let Some(ws) = &workspace {
         if ws.has_member {
             println!("  part of the Cargo workspace {}", ws.root.display());
@@ -641,8 +664,9 @@ mod tests {
     fn creates_an_app() {
         let tmp = std::env::temp_dir().join(format!("rux-new-test-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&tmp);
+        let home = tmp.join("rux-home");
         let dir = tmp.join("hello-world");
-        run(&dir, None, None).unwrap();
+        run_in(&home, &dir, None, None).unwrap();
 
         let app = AppCrate::load(&dir).unwrap();
         assert_eq!(app.lib_name, "hello_world");
@@ -651,12 +675,29 @@ mod tests {
         assert!(activity.is_file());
         assert!(dir.join("rust-toolchain.toml").is_file());
         let manifest = std::fs::read_to_string(dir.join("Cargo.toml")).unwrap();
-        assert!(manifest.contains(&format!("rux = {{ git = \"{RUX_GIT}\" }}")));
-        assert!(run(&dir, None, None).is_err(), "must not overwrite");
+        let dep = format!(
+            "rux = {{ version = \"={}\", path = \"{}\" }}",
+            sdk::VERSION,
+            sdk::APP_LINK
+        );
+        assert!(manifest.contains(&dep), "{manifest}");
+        assert!(manifest.contains("exclude = [\".rux\"]"));
+        // The SDK is installed under `home` and linked into the app.
+        assert!(dir.join(".rux/sdk/src/lib.rs").is_file());
+        assert!(
+            home.join("sdk")
+                .join(sdk::VERSION)
+                .join("src/lib.rs")
+                .is_file()
+        );
+        assert!(
+            run_in(&home, &dir, None, None).is_err(),
+            "must not overwrite"
+        );
 
         // A failed run removes the directory it created.
         let bad = tmp.join("bad");
-        assert!(run(&bad, None, Some("com.example.new")).is_err());
+        assert!(run_in(&home, &bad, None, Some("com.example.new")).is_err());
         assert!(!bad.exists());
         std::fs::remove_dir_all(&tmp).unwrap();
     }
