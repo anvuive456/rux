@@ -40,6 +40,16 @@ android {
         ruxProperties.getProperty("rux.sourceDirs", "").split(',').filter { it.isNotBlank() },
     )
 
+    buildTypes {
+        release {
+            // R8: shrinks and obfuscates the Kotlin / Java code. rux-runtime ships the keep
+            // rules for what Rust calls over JNI (consumer-rules.pro).
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"))
+        }
+    }
+
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
