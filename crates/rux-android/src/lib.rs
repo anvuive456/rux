@@ -8,11 +8,13 @@
 //!
 //! All calls happen on Android's main (UI) thread.
 
+mod logcat;
+
 use std::cell::{Cell, RefCell};
 use std::ffi::{CStr, c_char, c_void};
 
 pub use jni;
-use jni::objects::{GlobalRef, JObject, JString, JValue};
+use jni::objects::{GlobalRef, JByteArray, JClass, JObject, JString, JValue};
 use jni::sys::{jlong, jstring};
 use jni::{JNIEnv, JavaVM};
 use rux_core::{App, Event, EventKind, Mutation, NodeId};
@@ -139,9 +141,91 @@ struct HostHandle {
 }
 
 thread_local! {
-    /// In a hot-reloaded build: the JVM, to get a `JNIEnv` for events coming through the
-    /// trampoline.
-    static VM: Cell<*mut jni::sys::JavaVM> = const { Cell::new(std::ptr::null_mut()) };
+    /// The JVM, to get a `JNIEnv` outside JNI entry points (native API calls; events coming
+    /// through the hot reload trampoline).
+    static VM: Cell<Option<&'static JavaVM>> = const { Cell::new(None) };
+    /// `dev.rux.runtime.RuxChannels`, looked up from a JNI entry point (where the app's class
+    /// loader is in scope) for native API calls.
+    static CHANNELS: RefCell<Option<GlobalRef>> = const { RefCell::new(None) };
+}
+
+/// Remembers the JVM (once) and connects `rux::native` calls to `RuxChannels`.
+fn install_native(env: &mut JNIEnv) {
+    if VM.with(Cell::get).is_none()
+        && let Ok(vm) = env.get_java_vm()
+    {
+        VM.with(|v| v.set(Some(Box::leak(Box::new(vm)))));
+    }
+    match env
+        .find_class("dev/rux/runtime/RuxChannels")
+        .and_then(|c| env.new_global_ref(c))
+    {
+        Ok(class) => {
+            CHANNELS.with(|c| *c.borrow_mut() = Some(class));
+            rux_native::set_transport(Some(Box::new(JniTransport)));
+        }
+        Err(e) => {
+            let _ = env.exception_clear();
+            eprintln!("[rux] native APIs unavailable: {e}");
+        }
+    }
+}
+
+/// Native API calls → `RuxChannels.invoke(api, method, callId, args)` (Kotlin).
+struct JniTransport;
+
+impl rux_native::Transport for JniTransport {
+    fn invoke(&self, api: &str, method: u32, call_id: u64, args: &[u8]) {
+        let Some(mut env) = vm_env() else { return };
+        CHANNELS.with(|c| {
+            let c = c.borrow();
+            let Some(class) = c.as_ref() else { return };
+            let class: &JClass = class.as_obj().into();
+            let result = (|| -> jni::errors::Result<()> {
+                let api = env.new_string(api)?;
+                let args = env.byte_array_from_slice(args)?;
+                env.call_static_method(
+                    class,
+                    "invoke",
+                    "(Ljava/lang/String;IJ[B)V",
+                    &[
+                        JValue::Object(&api),
+                        JValue::Int(method as i32),
+                        JValue::Long(call_id as jlong),
+                        JValue::Object(&args),
+                    ],
+                )?;
+                env.delete_local_ref(api)?;
+                env.delete_local_ref(args)?;
+                Ok(())
+            })();
+            if let Err(e) = result {
+                eprintln!("[rux] native call {api}#{method} failed: {e}");
+                if env.exception_check().unwrap_or(false) {
+                    let _ = env.exception_describe();
+                    let _ = env.exception_clear();
+                }
+            }
+        });
+    }
+}
+
+/// A native API reply: completes the call, re-rendering if an async callback changed state.
+fn deliver(env: &mut JNIEnv, call_id: u64, payload: &[u8]) {
+    if rux_native::deliver(call_id, payload) {
+        with_renderer(env, |r| host::refresh(r));
+    }
+}
+
+/// Reply to a native API call. Called from `RuxNative.nativeReply(callId, payload)`.
+pub fn reply(mut env: JNIEnv, call_id: jlong, payload: JByteArray) {
+    host::guard("nativeReply", || {
+        let payload = env.convert_byte_array(&payload).unwrap_or_default();
+        match dev::active() {
+            Some(lib) => lib.reply(call_id as u64, &payload),
+            None => deliver(&mut env, call_id as u64, &payload),
+        }
+    });
 }
 
 /// The handle to pass to a hot-reloaded build: this thread's JVM + the `RuxHost` global ref.
@@ -153,6 +237,7 @@ fn host_handle(env: &JNIEnv) -> Option<HostHandle> {
 
 /// Starts the app. Called from `RuxNative.nativeStart(host)`.
 pub fn start(mut env: JNIEnv, host: JObject, create_app: fn() -> Box<dyn App>) {
+    logcat::redirect_stdio();
     host::guard("nativeStart", || {
         let global = match env.new_global_ref(host) {
             Ok(g) => g,
@@ -173,6 +258,7 @@ pub fn start(mut env: JNIEnv, host: JObject, create_app: fn() -> Box<dyn App>) {
             }
             return;
         }
+        install_native(&mut env);
         let (app, _) = dev::create_app(create_app, Vec::new());
         with_renderer(&mut env, |r| host::install(Runtime::new(app), r));
     });
@@ -213,6 +299,7 @@ pub fn stop() {
             None => host::uninstall(),
         }
         HOST.with(|h| h.borrow_mut().take());
+        rux_native::set_transport(None);
     });
 }
 
@@ -259,9 +346,9 @@ pub unsafe fn dev_start(
     unsafe {
         dev::export_start(prev, prev_len, msg, msg_cap, |previous| {
             let handle = &*handle.cast::<HostHandle>();
-            VM.with(|v| v.set(handle.vm));
             let vm = JavaVM::from_raw(handle.vm).expect("JavaVM");
             let mut env = vm.get_env().expect("JNIEnv on the UI thread");
+            install_native(&mut env);
             // The trampoline keeps its own global ref alive; take ours for this build.
             let host = JObject::from_raw(handle.host);
             let global = env.new_global_ref(&host).expect("RuxHost global ref");
@@ -301,14 +388,25 @@ pub unsafe fn dev_stop(len: *mut usize) -> *const HotSignal {
                 with_renderer(&mut env, |r| host::teardown(r));
             }
             HOST.with(|h| h.borrow_mut().take());
+            rux_native::set_transport(None);
         })
     }
 }
 
+/// `rux_dev_reply`: a native API reply forwarded by the trampoline.
+///
+/// # Safety
+/// `payload` must point to `len` readable bytes.
+pub unsafe fn dev_reply(call_id: u64, payload: *const u8, len: usize) {
+    host::guard("rux_dev_reply", || {
+        let payload = unsafe { std::slice::from_raw_parts(payload, len) };
+        if let Some(mut env) = vm_env() {
+            deliver(&mut env, call_id, payload);
+        }
+    });
+}
+
+/// A `JNIEnv` for the current (UI) thread.
 fn vm_env() -> Option<JNIEnv<'static>> {
-    let vm = VM.with(Cell::get);
-    // SAFETY: set from the trampoline's JavaVM, which lives for the whole process.
-    let vm = unsafe { JavaVM::from_raw(vm) }.ok()?;
-    let vm: &'static JavaVM = Box::leak(Box::new(vm));
-    vm.get_env().ok()
+    VM.with(Cell::get)?.get_env().ok()
 }

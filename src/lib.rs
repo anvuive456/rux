@@ -28,8 +28,15 @@ pub use rux_platform::{Renderer, Runtime, testing};
 pub use rux_state::Signal;
 pub use rux_ui::*;
 
+pub use rux_macros::{NativeType, async_call, host_api};
+/// Calling native (Kotlin / Swift) code: declare an API with [`host_api`], implement it
+/// natively, call it from Rust. See `rux_native` and the `device-info` example plugin.
+pub use rux_native as native;
+
 pub mod prelude {
     pub use rux_core::{App, Color, Element, ElementKind, Event, EventKind};
+    pub use rux_macros::NativeType;
+    pub use rux_native::NativeError;
     pub use rux_state::Signal;
     pub use rux_ui::*;
 }
@@ -104,6 +111,16 @@ macro_rules! main {
                 $crate::__android::stop();
             }
 
+            #[unsafe(no_mangle)]
+            pub extern "system" fn Java_dev_rux_runtime_RuxNative_nativeReply<'l>(
+                env: JNIEnv<'l>,
+                _class: JClass<'l>,
+                call_id: jlong,
+                payload: $crate::__android::jni::objects::JByteArray<'l>,
+            ) {
+                $crate::__android::reply(env, call_id, payload);
+            }
+
             #[cfg(debug_assertions)]
             #[unsafe(no_mangle)]
             pub extern "system" fn Java_dev_rux_runtime_RuxNative_nativeReload<'l>(
@@ -149,6 +166,11 @@ macro_rules! main {
             pub unsafe extern "C" fn rux_dev_stop(len: *mut usize) -> *const HotSignal {
                 unsafe { backend::dev_stop(len) }
             }
+
+            #[unsafe(no_mangle)]
+            pub unsafe extern "C" fn rux_dev_reply(call_id: u64, payload: *const u8, len: usize) {
+                unsafe { backend::dev_reply(call_id, payload, len) }
+            }
         };
 
         #[cfg(target_os = "ios")]
@@ -172,6 +194,15 @@ macro_rules! main {
             #[unsafe(no_mangle)]
             pub extern "C" fn rux_stop() {
                 $crate::__ios::stop();
+            }
+
+            #[unsafe(no_mangle)]
+            pub unsafe extern "C" fn rux_native_reply(
+                call_id: u64,
+                payload: *const u8,
+                len: usize,
+            ) {
+                unsafe { $crate::__ios::reply(call_id, payload, len) }
             }
 
             #[cfg(debug_assertions)]

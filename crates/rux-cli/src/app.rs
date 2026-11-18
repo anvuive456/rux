@@ -43,6 +43,9 @@ pub struct RuxMeta {
     android_app_id: Option<String>,
     /// Overrides `app-id` on iOS.
     ios_bundle_id: Option<String>,
+    /// Apple development team (`DEVELOPMENT_TEAM`) to sign with. Default for device builds: the
+    /// only team among the Mac's development certificates.
+    pub ios_development_team: Option<String>,
 }
 
 impl RuxMeta {

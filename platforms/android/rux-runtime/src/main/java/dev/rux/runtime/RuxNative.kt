@@ -20,6 +20,9 @@ object RuxNative {
     @JvmStatic external fun nativeDispatch(id: Long, event: String, value: String?)
     @JvmStatic external fun nativeStop()
 
+    /** Answers a native API call (see [RuxReply]). Main thread. */
+    @JvmStatic external fun nativeReply(callId: Long, payload: ByteArray)
+
     /**
      * Debug builds only: hands the app over to the library build at [path] — hot reload when
      * [keepState], hot restart otherwise. Returns a one-line report (`ok …` / `err …`).

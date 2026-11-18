@@ -1,0 +1,15 @@
+[package]
+name = "rux-macros"
+description = "Procedural macros for rux: #[host_api], #[async_call], #[derive(NativeType)]."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[lib]
+proc-macro = true
+
+[dependencies]
+syn.workspace = true
+quote.workspace = true
+proc-macro2.workspace = true

@@ -52,10 +52,13 @@ remove_child / release / set_root / listen) and `Event`. Adding a platform means
 | `crates/rux-platform`           | `Renderer` trait, `Runtime`, per-UI-thread runtime, `testing::Harness` (headless) |
 | `crates/rux-android`            | Android backend: calls `RuxHost` (Kotlin) over JNI |
 | `crates/rux-ios`                | iOS backend: calls a C vtable provided by Swift |
-| `crates/rux-cli`                | The `rux` CLI: `doctor`, `build`, `run` (android / ios) |
+| `crates/rux-native`             | Calling native code: codec, sync / async calls, test mocks (`rux::native`) |
+| `crates/rux-macros`             | `#[rux::host_api]`, `#[rux::async_call]`, `#[derive(NativeType)]` |
+| `crates/rux-cli`                | The `rux` CLI: `doctor`, `build`, `run` (android / ios), native API codegen |
 | `platforms/android/rux-runtime` | Shared Android library (Kotlin): `RuxNative`, `RuxHost` |
 | `platforms/ios`                 | Swift package `RuxRuntime`: `rux.h` + `RuxHost` |
 | `examples/counter`              | Sample app + Android / iOS projects |
+| `examples/device-info`          | Sample plugin: device info (sync) + battery (async) in Kotlin / Swift |
 
 ## App layout
 
@@ -124,12 +127,17 @@ rux build ios                           # → target/ios/counter.xcframework
 cd ios && xcodegen && open RuxCounter.xcodeproj
 ```
 
-Or build + install + launch on a simulator (the booted one, else the newest iPhone; `--device <name or
-UDID>` to choose):
+Or build + install + launch on a simulator (the booted one, else the newest iPhone), or on a
+connected iPhone / iPad with `--device <name or id>` (see `xcrun devicectl list devices`):
 
 ```sh
 rux run ios
+rux run ios --device "My iPhone"
 ```
+
+Device builds use Xcode's automatic signing. The team is `ios-development-team` in
+`[package.metadata.rux]` (also written to `rux.xcconfig`), else the only team among the Mac's
+Apple Development certificates.
 
 ### App id & version
 
@@ -162,11 +170,13 @@ between 1 and 2100000000 (Google Play's limit).
 
 ## Hot reload
 
-`rux run` (debug builds) stays attached to the app, like `flutter run`:
+`rux run` stays attached to the app, like `flutter run`: it streams the app's logs (Android:
+logcat of the app's process, including Rust's stdout / stderr; iOS: the app's stdout / stderr) and
+reads single-key commands. In debug builds it hot reloads:
 
 ```text
 🔥 Hot reload is on: save a file to hot reload.
-   r ⏎  hot reload (keep state)   R ⏎  hot restart   q ⏎  quit
+   r  hot reload (keep state)   R  hot restart   c  clear   h  help   q  quit (the app keeps running)
 ✓ hot reload: kept 2 state value(s) (691 ms)
 ```
 
@@ -182,7 +192,69 @@ How it works: the library the app starts with acts as a trampoline. The app's de
 (`RuxDevClient` in the Android / iOS runtimes, debug builds only) connects to the dev server of
 `rux run` (through `adb reverse` on Android), receives each new build, and the trampoline hands the
 app over to it (`rux_platform::dev`). Old builds stay loaded, so state created by them stays valid.
-Pass `--no-hot` to just launch the app. iOS hot reload works on the simulator.
+Pass `--no-hot` to stay attached without hot reload, or `--detach` to just launch the app. iOS hot
+reload works on the simulator (physical devices get logs only).
+
+## Native APIs & plugins
+
+Like Flutter's [Pigeon](https://pub.dev/packages/pigeon): declare an API once in Rust, implement it
+in Kotlin / Swift, call it from Rust with types on every side.
+
+**1. Declare** (in the app or a plugin crate):
+
+```rust
+#[derive(NativeType)]
+pub struct Battery { pub level: Option<i32>, pub state: BatteryState }
+
+#[rux::host_api]
+pub trait DeviceInfoApi {
+    fn info(&self) -> Result<DeviceInfo, NativeError>;   // sync
+    #[rux::async_call]
+    fn battery(&self) -> Result<Battery, NativeError>;   // async
+}
+```
+
+**2. Implement** the interface / protocol `rux build` generates from it (in
+`<android|ios>/rux-generated/`, package `dev.rux.generated.<crate_name>` on Android):
+
+```kotlin
+class DeviceInfoApiImpl(private val context: Context) : DeviceInfoApi {
+    override fun info() = DeviceInfo(platform = "Android", /* … */)
+    override fun battery(callback: (Result<Battery>) -> Unit) { /* … */ callback(Result.success(battery)) }
+}
+```
+```swift
+final class DeviceInfoApiImpl: DeviceInfoApi {
+    func info() throws -> DeviceInfo { /* … */ }
+    func battery(completion: @escaping (Result<Battery, Error>) -> Void) { /* … */ }
+}
+```
+
+**3. Register** the implementations in `Cargo.toml` — `rux build` generates a registrant that
+`RuxHost` runs at startup (Android: constructed with the Activity as `Context`; iOS: `init()`):
+
+```toml
+[package.metadata.rux.native]
+DeviceInfoApi = { android = "dev.rux.plugins.deviceinfo.DeviceInfoApiImpl", ios = "DeviceInfoApiImpl" }
+
+[package.metadata.rux.plugin]   # plugins only: where their Kotlin / Swift sources live
+android = "android"
+ios = "ios"
+```
+
+**4. Call** it from Rust:
+
+```rust
+let info = DeviceInfoApi::new().info()?;                       // returns right away
+DeviceInfoApi::new().battery(move |b| battery.set(Some(b)));   // callback on the UI thread
+```
+
+A plugin is just a crate with all of the above (see `examples/device-info`); an app depends on it
+and `rux build` picks it up. Since Rust, Kotlin and Swift all run on the UI thread, a sync call is a
+plain nested call (no thread hop). Supported types: `bool`, `i32`, `i64`, `f64`, `String`,
+`Option<T>`, `Vec<T>`, `()`, and `#[derive(NativeType)]` structs (named fields) / enums (unit
+variants). In headless tests, fake the native side with `rux::native::testing::mock`. Changing a
+`#[host_api]` declaration needs a full `rux run` (hot reload warns about it).
 
 ## UI tests without an emulator
 
@@ -212,5 +284,6 @@ gh pr create
 - [ ] State updates from other threads / async (marshalled to the UI thread)
 - [ ] Batch mutations into a single FFI call (fewer JNI crossings)
 - [ ] `rux new` (project template)
-- [ ] `rux run`: stream app logs, physical iOS devices (code signing), single-key commands
+- [x] `rux run`: stream app logs, physical iOS devices (code signing), single-key commands
+- [ ] Hot reload on physical iOS devices
 - [ ] Next platforms: macOS (AppKit), Windows (WinUI), Web (DOM)

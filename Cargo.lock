@@ -380,6 +380,8 @@ dependencies = [
  "rux-android",
  "rux-core",
  "rux-ios",
+ "rux-macros",
+ "rux-native",
  "rux-platform",
  "rux-state",
  "rux-ui",
@@ -390,7 +392,9 @@ name = "rux-android"
 version = "0.1.0"
 dependencies = [
  "jni",
+ "libc",
  "rux-core",
+ "rux-native",
  "rux-platform",
  "rux-state",
 ]
@@ -401,6 +405,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
+ "libc",
  "notify",
  "quote",
  "serde",
@@ -414,10 +419,18 @@ name = "rux-core"
 version = "0.1.0"
 
 [[package]]
+name = "rux-device-info"
+version = "0.1.0"
+dependencies = [
+ "rux",
+]
+
+[[package]]
 name = "rux-example-counter"
 version = "0.1.0+1"
 dependencies = [
  "rux",
+ "rux-device-info",
 ]
 
 [[package]]
@@ -425,9 +438,23 @@ name = "rux-ios"
 version = "0.1.0"
 dependencies = [
  "rux-core",
+ "rux-native",
  "rux-platform",
  "rux-state",
 ]
+
+[[package]]
+name = "rux-macros"
+version = "0.1.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
+]
+
+[[package]]
+name = "rux-native"
+version = "0.1.0"
 
 [[package]]
 name = "rux-platform"

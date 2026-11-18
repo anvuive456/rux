@@ -16,8 +16,11 @@ rux-ui = { path = "crates/rux-ui", version = "0.1.0" }
 rux-platform = { path = "crates/rux-platform", version = "0.1.0" }
 rux-android = { path = "crates/rux-android", version = "0.1.0" }
 rux-ios = { path = "crates/rux-ios", version = "0.1.0" }
+rux-native = { path = "crates/rux-native", version = "0.1.0" }
+rux-macros = { path = "crates/rux-macros", version = "0.1.0" }
 
 jni = "0.21"
+libc = "0.2"
 anyhow = "1"
 clap = { version = "4", features = ["derive"] }
 serde = { version = "1", features = ["derive"] }
@@ -27,6 +30,7 @@ libloading = "0.8"
 notify = "8"
 syn = { version = "2", features = ["full"] }
 quote = "1"
+proc-macro2 = "1"
 
 # ---------------------------------------------------------------------------
 # `rux` — the facade crate that user apps depend on.
@@ -43,6 +47,8 @@ license.workspace = true
 rux-core.workspace = true
 rux-state.workspace = true
 rux-ui.workspace = true
+rux-native.workspace = true
+rux-macros.workspace = true
 rux-platform.workspace = true
 
 [target.'cfg(target_os = "android")'.dependencies]
