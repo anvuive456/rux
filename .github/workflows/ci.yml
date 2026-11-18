@@ -89,9 +89,12 @@ jobs:
         run: ./gradlew assembleDebug --no-daemon
 
       # Release: R8 runs with rux-runtime's keep rules (consumer-rules.pro).
+      # Release builds package the release Rust library (src/release/jniLibs).
       - name: Build APK (release, R8)
-        working-directory: examples/counter/android
         run: |
+          export ANDROID_NDK_HOME="$ANDROID_NDK_LATEST_HOME"
+          cargo run -p rux-cli -- build android --path examples/counter --abi arm64-v8a --abi x86_64 --release
+          cd examples/counter/android
           ./gradlew assembleRelease --no-daemon
           grep -F 'dev.rux.runtime.RuxChannels: void invoke(' app/build/outputs/mapping/release/seeds.txt
           grep -F 'dev.rux.generated.RuxRegistrant: void register(' app/build/outputs/mapping/release/seeds.txt
