@@ -23,6 +23,14 @@ pub fn run() -> Result<()> {
         }
     };
 
+    println!("rux {}", crate::sdk::VERSION);
+    let sdk = crate::sdk::status();
+    check(
+        !sdk.starts_with("not"),
+        &format!("rux SDK: {sdk}"),
+        "rux setup",
+    );
+
     println!("Android");
     for t in ["aarch64-linux-android", "x86_64-linux-android"] {
         check(installed.contains(t), t, &format!("rustup target add {t}"));

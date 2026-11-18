@@ -54,7 +54,7 @@ remove_child / release / set_root / listen) and `Event`. Adding a platform means
 | `crates/rux-ios`                | iOS backend: calls a C vtable provided by Swift |
 | `crates/rux-native`             | Calling native code: codec, sync / async calls, test mocks (`rux::native`) |
 | `crates/rux-macros`             | `#[rux::host_api]`, `#[rux::async_call]`, `#[derive(NativeType)]` |
-| `crates/rux-cli`                | The `rux` CLI: `new`, `doctor`, `build`, `run` (android / ios), native API codegen |
+| `crates/rux-cli`                | The `rux` CLI (embeds the SDK): `setup`, `new`, `doctor`, `build`, `run` (android / ios), native API codegen |
 | `platforms/android/rux-runtime` | Shared Android library (Kotlin): `RuxNative`, `RuxHost` |
 | `platforms/ios`                 | Swift package `RuxRuntime`: `rux.h` + `RuxHost` |
 | `examples/counter`              | Sample app + Android / iOS projects |
@@ -103,21 +103,35 @@ Invoke-WebRequest https://github.com/anvuive456/rux/releases/latest/download/rux
 Expand-Archive rux.zip -DestinationPath "$HOME\.rux\bin"   # then add it to PATH
 ```
 
-Every release lists the archives' checksums in `SHA256SUMS`. Apps created by a released `rux new`
-use rux from the same release tag. On macOS, an archive downloaded with a browser is quarantined:
-run `xattr -d com.apple.quarantine rux` once.
+Every release lists the archives' checksums in `SHA256SUMS`. On macOS, an archive downloaded with
+a browser is quarantined: run `xattr -d com.apple.quarantine rux` once.
 
-Or build it from source (apps it creates use rux's `main` branch):
+Or build it from source: `cargo install --path crates/rux-cli`.
 
-```sh
-cargo install --path crates/rux-cli
-```
-
-Then:
+Then install the rux library (the SDK) and check your toolchains:
 
 ```sh
+rux setup                              # installs the rux SDK of the CLI's version in ~/.rux/sdk/<version>
 rux doctor                             # checks your toolchains
 ```
+
+### One version: the CLI and the SDK
+
+Like Flutter's SDK, rux isn't published to a package registry: the `rux` CLI embeds the rux SDK
+(the `rux` crate, the crates it depends on and the Android / iOS runtimes) of its own version, so
+the tool and the library can't drift apart. `rux setup` installs it in `~/.rux/sdk/<version>` (or
+`$RUX_HOME/sdk/<version>`), and links it into an app as `.rux/sdk` (gitignored), which the app
+depends on:
+
+```toml
+[dependencies]
+rux = { version = "=0.2.0", path = ".rux/sdk" }
+```
+
+- `rux new` does this for you; after cloning an app, run `rux setup` once (like `flutter pub get`).
+- `rux build` / `rux run` relink the SDK when it's missing or outdated.
+- The app states its rux version: a `rux` CLI of another version refuses to build it and says
+  which release to install, or how to move the app to the CLI's version (change `=0.2.0`).
 
 ### New app
 
@@ -132,16 +146,9 @@ The app has the same layout as `examples/counter` (see [App layout](#app-layout)
 `--name <package>` (default: the directory's name), `--app-id <id>` (default:
 `com.example.<name>`).
 
-The app depends on rux like on any crate (from git until rux is on crates.io), and no rux checkout
-is needed: the Android / iOS runtimes ship inside the `rux` crate, and `rux build` takes them from
-the one cargo resolved for the app (written to `android/rux.properties` and `ios/rux.yml`), so
-they always match the Rust side. To try an app against a local rux checkout, patch it in the app's
-`Cargo.toml`:
-
-```toml
-[patch."https://github.com/anvuive456/rux"]
-rux = { path = "../rux" }
-```
+The app uses the rux SDK of the CLI's version (see above). `rux build` takes the Android / iOS
+runtimes from the `rux` crate cargo resolved for the app (written to `android/rux.properties` and
+`ios/rux.yml`), so they always match the Rust side.
 
 ### Android
 
@@ -343,8 +350,8 @@ cargo test --workspace                 # runs all tests, including the headless 
    ```
 
 The [Release workflow](.github/workflows/release.yml) checks that the tag matches the version,
-builds `rux` for macOS (arm64, x64), Linux (x64, arm64; static musl) and Windows (x64),
-smoke-tests it (`rux new`), and publishes a GitHub Release with the archives, `SHA256SUMS` and
+builds `rux` (embedding the SDK) for macOS (arm64, x64), Linux (x64, arm64; static musl) and
+Windows (x64), smoke-tests it (`rux new` + `cargo check` of the app), and publishes a GitHub Release with the archives, `SHA256SUMS` and
 generated notes. Tags with a suffix (`v0.2.0-beta.1`) become pre-releases.
 
 ## Roadmap

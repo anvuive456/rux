@@ -48,8 +48,6 @@ jobs:
       - name: rux new + test
         run: |
           cargo run -p rux-cli -- new "$RUNNER_TEMP/hello-rux"
-          # Build against this commit, not rux from GitHub.
-          printf '\n[patch."https://github.com/anvuive456/rux"]\nrux = { path = "%s" }\n' "$GITHUB_WORKSPACE" >> "$RUNNER_TEMP/hello-rux/Cargo.toml"
           cargo test --manifest-path "$RUNNER_TEMP/hello-rux/Cargo.toml"
 
   android:
@@ -101,8 +99,6 @@ jobs:
         run: |
           export ANDROID_NDK_HOME="$ANDROID_NDK_LATEST_HOME"
           cargo run -p rux-cli -- new "$RUNNER_TEMP/hello-rux"
-          # Build against this commit, not rux from GitHub.
-          printf '\n[patch."https://github.com/anvuive456/rux"]\nrux = { path = "%s" }\n' "$GITHUB_WORKSPACE" >> "$RUNNER_TEMP/hello-rux/Cargo.toml"
           cargo run -p rux-cli -- build android --path "$RUNNER_TEMP/hello-rux" --abi x86_64
           cd "$RUNNER_TEMP/hello-rux/android" && ./gradlew assembleDebug --no-daemon
 
@@ -147,8 +143,6 @@ jobs:
       - name: rux new + build app (simulator)
         run: |
           cargo run -p rux-cli -- new "$RUNNER_TEMP/hello-rux"
-          # Build against this commit, not rux from GitHub.
-          printf '\n[patch."https://github.com/anvuive456/rux"]\nrux = { path = "%s" }\n' "$GITHUB_WORKSPACE" >> "$RUNNER_TEMP/hello-rux/Cargo.toml"
           cargo run -p rux-cli -- build ios --path "$RUNNER_TEMP/hello-rux"
           cd "$RUNNER_TEMP/hello-rux/ios" && xcodegen generate
           xcodebuild build \
