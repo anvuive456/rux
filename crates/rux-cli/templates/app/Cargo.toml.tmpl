@@ -1,0 +1,23 @@
+[package]
+name = "{{name}}"
+# Version name + build number (`x.y.z+n`), used for both platforms.
+version = "0.1.0+1"
+edition = "2024"
+publish = false
+
+[lib]
+# Native library name: lib{{lib_name}}.so (Android) / lib{{lib_name}}.a (iOS).
+name = "{{lib_name}}"
+crate-type = ["lib", "cdylib", "staticlib"]
+
+[dependencies]
+rux = { path = "{{rux_path}}" }
+
+# Configuration for the `rux` CLI.
+[package.metadata.rux]
+android-project = "android"
+ios-project = "ios"
+# Android applicationId + iOS bundle identifier. Override per platform with
+# `android-app-id` / `ios-bundle-id` if they differ.
+app-id = "{{app_id}}"
+{{workspace}}

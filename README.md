@@ -54,7 +54,7 @@ remove_child / release / set_root / listen) and `Event`. Adding a platform means
 | `crates/rux-ios`                | iOS backend: calls a C vtable provided by Swift |
 | `crates/rux-native`             | Calling native code: codec, sync / async calls, test mocks (`rux::native`) |
 | `crates/rux-macros`             | `#[rux::host_api]`, `#[rux::async_call]`, `#[derive(NativeType)]` |
-| `crates/rux-cli`                | The `rux` CLI: `doctor`, `build`, `run` (android / ios), native API codegen |
+| `crates/rux-cli`                | The `rux` CLI: `new`, `doctor`, `build`, `run` (android / ios), native API codegen |
 | `platforms/android/rux-runtime` | Shared Android library (Kotlin): `RuxNative`, `RuxHost` |
 | `platforms/ios`                 | Swift package `RuxRuntime`: `rux.h` + `RuxHost` |
 | `examples/counter`              | Sample app + Android / iOS projects |
@@ -90,6 +90,25 @@ cargo test --workspace                 # runs all tests, including the headless 
 cargo install --path crates/rux-cli    # installs the `rux` CLI
 rux doctor                             # checks your toolchains
 ```
+
+### New app
+
+```sh
+rux new my-app                         # → my-app/: Cargo.toml, src/, tests/, android/, ios/
+cd my-app
+cargo test                             # headless UI tests
+rux run android                        # or: rux run ios
+```
+
+The app has the same layout as `examples/counter` (see [App layout](#app-layout)). Options:
+`--name <package>` (default: the directory's name), `--app-id <id>` (default:
+`com.example.<name>`), `--rux-path <checkout>`.
+
+rux isn't published yet, so a new app builds against a rux checkout, like a Flutter app builds
+against the Flutter SDK: the `rux` crate, the Android runtime and the iOS runtime are referenced by
+relative paths, and the checkout's `rust-toolchain.toml` is copied into the app. The default
+checkout is the one `rux` was installed from (`cargo install --path crates/rux-cli`); pass
+`--rux-path` to use another one.
 
 ### Android
 
@@ -283,7 +302,7 @@ gh pr create
 - [ ] Components with local state & fine-grained updates instead of re-rendering the whole `view()`
 - [ ] State updates from other threads / async (marshalled to the UI thread)
 - [ ] Batch mutations into a single FFI call (fewer JNI crossings)
-- [ ] `rux new` (project template)
+- [x] `rux new` (project template)
 - [x] `rux run`: stream app logs, physical iOS devices (code signing), single-key commands
 - [ ] Hot reload on physical iOS devices
 - [ ] Next platforms: macOS (AppKit), Windows (WinUI), Web (DOM)
