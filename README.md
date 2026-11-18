@@ -102,13 +102,18 @@ rux run android                        # or: rux run ios
 
 The app has the same layout as `examples/counter` (see [App layout](#app-layout)). Options:
 `--name <package>` (default: the directory's name), `--app-id <id>` (default:
-`com.example.<name>`), `--rux-path <checkout>`.
+`com.example.<name>`).
 
-rux isn't published yet, so a new app builds against a rux checkout, like a Flutter app builds
-against the Flutter SDK: the `rux` crate, the Android runtime and the iOS runtime are referenced by
-relative paths, and the checkout's `rust-toolchain.toml` is copied into the app. The default
-checkout is the one `rux` was installed from (`cargo install --path crates/rux-cli`); pass
-`--rux-path` to use another one.
+The app depends on rux like on any crate (from git until rux is on crates.io), and no rux checkout
+is needed: the Android / iOS runtimes ship inside the `rux` crate, and `rux build` takes them from
+the one cargo resolved for the app (written to `android/rux.properties` and `ios/rux.yml`), so
+they always match the Rust side. To try an app against a local rux checkout, patch it in the app's
+`Cargo.toml`:
+
+```toml
+[patch."https://github.com/anvuive456/rux"]
+rux = { path = "../rux" }
+```
 
 ### Android
 

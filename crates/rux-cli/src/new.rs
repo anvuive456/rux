@@ -2,9 +2,9 @@
 //! `examples/counter`: Rust code in `src/`, headless tests in `tests/`, native shells in
 //! `android/` and `ios/`).
 //!
-//! rux isn't published, so a new app points at a rux checkout (like a Flutter app points at the
-//! Flutter SDK): the `rux` crate, the Android runtime (`platforms/android/rux-runtime`) and the
-//! iOS runtime (`platforms/ios`). By default that's the checkout this CLI was built from.
+//! The app depends on the `rux` crate ([`RUX_GIT`] until rux is on crates.io); `rux build` takes
+//! the Android / iOS runtimes from the `rux` crate cargo resolves (see `deps`), so no rux
+//! checkout is needed.
 
 use std::path::{Path, PathBuf};
 
@@ -13,8 +13,11 @@ use anyhow::{Context, Result, bail};
 use crate::app::AppCrate;
 use crate::app_id::{validate_android_app_id, validate_ios_bundle_id};
 
-/// The checkout this CLI was built from (`crates/rux-cli/../..`).
-const BUILT_FROM: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../..");
+/// Where new apps get the `rux` crate from (it isn't on crates.io yet).
+const RUX_GIT: &str = "https://github.com/anvuive456/rux";
+
+/// `rust-toolchain.toml` of standalone apps: the Rust version rux needs.
+const TOOLCHAIN: &str = include_str!("../templates/app/rust-toolchain.toml.tmpl");
 
 enum Content {
     /// Rendered: `{{key}}` placeholders are replaced.
@@ -92,7 +95,7 @@ const TEMPLATE: &[TemplateFile] = &[
     ),
 ];
 
-pub fn run(dir: &Path, name: Option<&str>, app_id: Option<&str>, rux: Option<&Path>) -> Result<()> {
+pub fn run(dir: &Path, name: Option<&str>, app_id: Option<&str>) -> Result<()> {
     let dir = std::path::absolute(dir).with_context(|| format!("resolving {}", dir.display()))?;
     let existed = dir.exists();
     if existed && std::fs::read_dir(&dir)?.next().is_some() {
@@ -120,17 +123,16 @@ pub fn run(dir: &Path, name: Option<&str>, app_id: Option<&str>, rux: Option<&Pa
             "invalid --app-id".to_owned()
         }
     })?;
-    let rux = rux_checkout(rux)?;
 
     std::fs::create_dir_all(&dir).with_context(|| format!("creating {}", dir.display()))?;
-    let result = generate(&dir, &names, &app_id, &rux);
+    let result = generate(&dir, &names, &app_id);
     if result.is_err() && !existed {
         let _ = std::fs::remove_dir_all(&dir);
     }
     result
 }
 
-fn generate(dir: &Path, names: &Names, app_id: &str, rux: &Path) -> Result<()> {
+fn generate(dir: &Path, names: &Names, app_id: &str) -> Result<()> {
     // Real paths: the relative paths written into the project must survive symlinks
     // (e.g. /tmp → /private/tmp on macOS).
     let dir = real_path(dir)?;
@@ -147,19 +149,16 @@ fn generate(dir: &Path, names: &Names, app_id: &str, rux: &Path) -> Result<()> {
         ("app_id", app_id.to_owned()),
         ("android_package", app_id.to_owned()),
         ("android_package_dir", app_id.replace('.', "/")),
-        ("rux_path", escape_quoted(&relative(&dir, rux))),
         (
-            "android_runtime",
-            escape_quoted(&relative(
-                &dir.join("android"),
-                &rux.join("platforms/android/rux-runtime"),
-            ))
-            .replace('$', "\\$"),
+            "rux_dep",
+            // Inside rux's own workspace (e.g. `examples/`), use its `rux`.
+            if workspace.as_ref().is_some_and(|w| w.has_rux_dep) {
+                "{ workspace = true }".to_owned()
+            } else {
+                format!("{{ git = \"{RUX_GIT}\" }}")
+            },
         ),
-        (
-            "ios_runtime",
-            escape_quoted(&relative(&ios_dir, &rux.join("platforms/ios"))),
-        ),
+        ("rust_version", env!("CARGO_PKG_RUST_VERSION").to_owned()),
         (
             "xcframework",
             escape_quoted(&relative(
@@ -193,12 +192,15 @@ fn generate(dir: &Path, names: &Names, app_id: &str, rux: &Path) -> Result<()> {
             make_executable(&path)?;
         }
     }
-    // rux needs the toolchain its checkout pins (`rust-version`). rustup looks for this file
-    // in parent directories, so an app inside a workspace already gets the workspace's.
-    let toolchain = rux.join("rust-toolchain.toml");
-    if workspace.is_none() && toolchain.is_file() {
-        std::fs::copy(&toolchain, dir.join("rust-toolchain.toml"))
-            .with_context(|| format!("copying {}", toolchain.display()))?;
+    // rustup also looks for this file in parent directories: keep an enclosing one.
+    let has_toolchain = dir
+        .ancestors()
+        .skip(1)
+        .any(|d| d.join("rust-toolchain.toml").is_file() || d.join("rust-toolchain").is_file());
+    if !has_toolchain {
+        let path = dir.join("rust-toolchain.toml");
+        std::fs::write(&path, render(TOOLCHAIN, &vars))
+            .with_context(|| format!("writing {}", path.display()))?;
     }
 
     // Catches template mistakes (bad placeholders, invalid ids) before the user does.
@@ -207,7 +209,6 @@ fn generate(dir: &Path, names: &Names, app_id: &str, rux: &Path) -> Result<()> {
     app.meta.ios_bundle_id()?;
 
     println!("✓ Created {} in {}", names.display, dir.display());
-    println!("  rux:    {}", rux.display());
     println!("  app id: {app_id}");
     if let Some(ws) = &workspace {
         if ws.has_member {
@@ -388,28 +389,12 @@ const JVM_KEYWORDS: &[&str] = &[
     "while",
 ];
 
-/// The rux checkout: `--rux-path`, else the one this CLI was built from.
-fn rux_checkout(given: Option<&Path>) -> Result<PathBuf> {
-    let (dir, hint) = match given {
-        Some(p) => (p.to_path_buf(), "--rux-path must point at a rux checkout"),
-        None => (
-            PathBuf::from(BUILT_FROM),
-            "the rux checkout this CLI was built from is gone: pass --rux-path <checkout>",
-        ),
-    };
-    let ok = dir.join("Cargo.toml").is_file()
-        && dir.join("platforms/android/rux-runtime").is_dir()
-        && dir.join("platforms/ios/Package.swift").is_file();
-    if !ok {
-        bail!("{} is not a rux checkout ({hint})", dir.display());
-    }
-    real_path(&dir)
-}
-
 struct Workspace {
     root: PathBuf,
     /// Whether the new app matches the workspace's `members`.
     has_member: bool,
+    /// Whether it has `rux` in `[workspace.dependencies]` (rux's own workspace does).
+    has_rux_dep: bool,
 }
 
 /// The Cargo workspace above `dir`, if any (Cargo would reject a nested `[workspace]` there).
@@ -439,6 +424,7 @@ fn enclosing_workspace(dir: &Path) -> Result<Option<Workspace>> {
         return Ok(Some(Workspace {
             root: root.to_path_buf(),
             has_member,
+            has_rux_dep: ws.get("dependencies").and_then(|d| d.get("rux")).is_some(),
         }));
     }
     Ok(None)
@@ -591,14 +577,14 @@ mod tests {
             "app_id",
             "android_package",
             "android_package_dir",
-            "rux_path",
-            "android_runtime",
-            "ios_runtime",
+            "rux_dep",
+            "rust_version",
             "xcframework",
             "workspace",
         ]
         .map(|k| (k, "x".to_owned()))
         .into();
+        assert!(!render(TOOLCHAIN, &vars).contains("{{"));
         for file in TEMPLATE {
             assert!(!render(file.path, &vars).contains("{{"), "{}", file.path);
             if let Content::Text(t) = file.content {
@@ -629,6 +615,26 @@ mod tests {
                 "templates/app/{file} differs from examples/counter/{file}"
             );
         }
+
+        let read = |p: &str| std::fs::read_to_string(root.join(p)).unwrap();
+        let vars = [("project_name", "RuxCounter".to_owned())];
+        assert_eq!(
+            render(&read("templates/app/android/settings.gradle.kts"), &vars),
+            read("../../examples/counter/android/settings.gradle.kts"),
+        );
+
+        // Same toolchain as rux itself (comments aside).
+        let settings = |t: &str| -> Vec<String> {
+            t.lines()
+                .filter(|l| !l.trim_start().starts_with('#'))
+                .map(str::to_owned)
+                .collect()
+        };
+        let vars = [("rust_version", env!("CARGO_PKG_RUST_VERSION").to_owned())];
+        assert_eq!(
+            settings(&render(TOOLCHAIN, &vars)),
+            settings(&read("../../rust-toolchain.toml")),
+        );
     }
 
     #[test]
@@ -636,7 +642,7 @@ mod tests {
         let tmp = std::env::temp_dir().join(format!("rux-new-test-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&tmp);
         let dir = tmp.join("hello-world");
-        run(&dir, None, None, None).unwrap();
+        run(&dir, None, None).unwrap();
 
         let app = AppCrate::load(&dir).unwrap();
         assert_eq!(app.lib_name, "hello_world");
@@ -644,11 +650,13 @@ mod tests {
         let activity = dir.join("android/app/src/main/java/com/example/helloworld/MainActivity.kt");
         assert!(activity.is_file());
         assert!(dir.join("rust-toolchain.toml").is_file());
-        assert!(run(&dir, None, None, None).is_err(), "must not overwrite");
+        let manifest = std::fs::read_to_string(dir.join("Cargo.toml")).unwrap();
+        assert!(manifest.contains(&format!("rux = {{ git = \"{RUX_GIT}\" }}")));
+        assert!(run(&dir, None, None).is_err(), "must not overwrite");
 
         // A failed run removes the directory it created.
         let bad = tmp.join("bad");
-        assert!(run(&bad, None, Some("com.example.new"), None).is_err());
+        assert!(run(&bad, None, Some("com.example.new")).is_err());
         assert!(!bad.exists());
         std::fs::remove_dir_all(&tmp).unwrap();
     }
