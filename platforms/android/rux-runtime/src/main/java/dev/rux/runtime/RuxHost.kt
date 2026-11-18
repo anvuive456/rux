@@ -47,12 +47,18 @@ class RuxHost(private val hostContext: Context, private val container: ViewGroup
         // Native API implementations (re-registered when the Activity is recreated).
         RuxChannels.registerGenerated(hostContext)
         RuxNative.nativeStart(this)
-        // `rux run` passes its dev server address to debug builds (hot reload).
-        (hostContext as? android.app.Activity)?.intent?.getStringExtra(RuxDevClient.EXTRA)?.let {
-            RuxDevClient.connect(hostContext, it)
-        }
+        // Hot reload, when launched by `rux run` (debug builds only; see RuxDevClient).
+        RuxDevClient.connect(hostContext)
     }
-    fun stop() = RuxNative.nativeStop()
+    /**
+     * Stops the app (call from `onDestroy`). If the Activity is only being recreated for a
+     * configuration change (rotation, dark mode, locale, font size, …), the app keeps running
+     * and the new Activity's [start] takes it over with its state.
+     */
+    fun stop() {
+        if ((hostContext as? android.app.Activity)?.isChangingConfigurations == true) return
+        RuxNative.nativeStop()
+    }
 
     // --- mutation protocol ---------------------------------------------------
 

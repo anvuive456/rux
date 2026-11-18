@@ -13,8 +13,10 @@ use super::adb::Adb;
 use crate::app::AppCrate;
 use crate::util::{on_path, output, run as run_cmd};
 
-/// Intent extra the app's dev client reads the server address from (`RuxDevClient.EXTRA`).
-const DEV_SERVER_EXTRA: &str = "rux.devServer";
+/// File in the app's private files dir the dev client reads the server address from
+/// (`RuxDevClient.ADDRESS_FILE`). Written with `run-as`, so other apps on the device can't
+/// point the app at a server of their own (the client loads the code it receives).
+const DEV_SERVER_FILE: &str = "files/rux-dev-server";
 
 pub fn run(
     app: &AppCrate,
@@ -60,15 +62,17 @@ pub fn run(
     } else {
         None
     };
-    let address = server.as_ref().map(|s| format!("127.0.0.1:{}", s.port()));
+    if !release {
+        match server.as_ref().map(|s| format!("127.0.0.1:{}", s.port())) {
+            Some(address) => set_dev_server(&adb, app_id, Some(&address))?,
+            // Clears a previous session's address; nothing to clear if this fails.
+            None => drop(set_dev_server(&adb, app_id, None)),
+        }
+    }
 
     let activity = launcher_activity(&adb, app_id)?;
-    // -S: restart the app if it's running, so it gets this launch's intent.
-    let mut start = vec!["am", "start", "-S", "-n", &activity];
-    if let Some(address) = &address {
-        start.extend(["--es", DEV_SERVER_EXTRA, address]);
-    }
-    let out = adb.shell(&start)?;
+    // -S: restart the app if it's running, so it starts its dev client for this session.
+    let out = adb.shell(&["am", "start", "-S", "-n", &activity])?;
     if out.contains("Error") {
         bail!("launching {activity} failed:\n{out}");
     }
@@ -89,10 +93,27 @@ pub fn run(
     };
     let result = hot::session(app, hot_reload, logs);
     if let Some(server) = &server {
+        let _ = set_dev_server(&adb, app_id, None);
         let port = format!("tcp:{}", server.port());
         let _ = output(adb.command().args(["reverse", "--remove", &port]));
     }
     result
+}
+
+/// Tells the (debuggable) app which dev server to connect to on its next start, or with
+/// `None` that it shouldn't connect.
+fn set_dev_server(adb: &Adb, app_id: &str, address: Option<&str>) -> Result<()> {
+    // `adb shell` joins its arguments into one command line for the device's shell: the
+    // single quotes keep the script one argument of `sh -c`.
+    let script = match address {
+        Some(address) => format!("'mkdir -p files && echo {address} > {DEV_SERVER_FILE}'"),
+        None => format!("'rm -f {DEV_SERVER_FILE}'"),
+    };
+    let out = adb.shell(&["run-as", app_id, "sh", "-c", &script])?;
+    if !out.is_empty() {
+        bail!("can't set up hot reload for {app_id} (run-as):\n{out}");
+    }
+    Ok(())
 }
 
 /// Streams the app process's logcat output (including Rust's stdout / stderr, which

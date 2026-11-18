@@ -31,3 +31,10 @@ The library the app starts with acts as a trampoline. In debug builds, the app's
 (`RuxDevClient` in the Android / iOS runtimes) connects to the dev server of `rux run` (through
 `adb reverse` on Android), receives each new build, and the trampoline hands the app over to it
 (`dlopen`; see `rux_platform::dev`). Old builds stay loaded, so state created by them stays valid.
+
+Because the dev client runs the code it receives, it only connects when `rux run` asked it to:
+on Android, `rux run` writes the server address into the app's private files with
+`adb shell run-as` (other apps on the device can't), and removes it when you quit with `q`. The
+client only runs in debuggable apps and only connects to a loopback address. On iOS it is
+compiled into Debug builds only, and the address comes from the launch environment set by
+`rux run`.
