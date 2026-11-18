@@ -3,7 +3,7 @@
 
     <application
         android:label="{{display_name}}"
-        android:theme="@android:style/Theme.Material.Light.NoActionBar">
+        android:theme="@style/Theme.Rux">
         <activity
             android:name=".MainActivity"
             android:exported="true"

@@ -3,7 +3,7 @@
 
     <application
         android:label="Rux Counter"
-        android:theme="@android:style/Theme.Material.Light.NoActionBar">
+        android:theme="@style/Theme.Rux">
         <activity
             android:name=".MainActivity"
             android:exported="true"
