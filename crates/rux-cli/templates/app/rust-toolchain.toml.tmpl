@@ -1,0 +1,11 @@
+# The Rust version rux needs (its `rust-version`); rustup installs it, with these targets, on
+# first use.
+[toolchain]
+channel = "{{rust_version}}"
+components = ["rustfmt", "clippy"]
+targets = [
+    "aarch64-linux-android",
+    "x86_64-linux-android",
+    "aarch64-apple-ios",
+    "aarch64-apple-ios-sim",
+]

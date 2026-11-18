@@ -3,6 +3,7 @@
 //! Run inside the app crate directory (where `Cargo.toml` has `[package.metadata.rux]`):
 //!
 //! ```text
+//! rux new <dir> [--name <package>] [--app-id <id>]
 //! rux doctor
 //! rux build android [--release] [--abi arm64-v8a --abi x86_64]
 //! rux build ios [--release]
@@ -20,10 +21,12 @@
 mod android;
 mod app;
 mod app_id;
+mod deps;
 mod doctor;
 mod hot;
 mod ios;
 mod native;
+mod new;
 mod util;
 mod version;
 
@@ -47,6 +50,17 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Cmd {
+    /// Create a new app (Rust code, headless tests, Android and iOS projects).
+    New {
+        /// Directory to create (must not exist, or be empty).
+        dir: PathBuf,
+        /// Cargo package name. Default: the directory's name.
+        #[arg(long)]
+        name: Option<String>,
+        /// Application id for Android and iOS. Default: `com.example.<name>`.
+        #[arg(long)]
+        app_id: Option<String>,
+    },
     /// Check the required toolchains.
     Doctor,
     /// Build the native library and copy it into the platform project.
@@ -96,6 +110,9 @@ enum Platform {
 fn main() -> Result<()> {
     let cli = Cli::parse();
     match cli.command {
+        Cmd::New { dir, name, app_id } => {
+            new::run(&cli.path.join(dir), name.as_deref(), app_id.as_deref())
+        }
         Cmd::Doctor => doctor::run(),
         Cmd::Build { platform, opts } => {
             let app = AppCrate::load(&cli.path)?;

@@ -20,6 +20,7 @@ DerivedData/
 .swiftpm/
 **/Sources/Info.plist
 rux.xcconfig
+rux.yml
 
 # OS
 .DS_Store

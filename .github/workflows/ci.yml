@@ -44,6 +44,14 @@ jobs:
       - name: Check (iOS target)
         run: cargo check -p rux-example-counter --target aarch64-apple-ios
 
+      # `rux new`: the generated app's tests pass (warnings are errors) outside the checkout.
+      - name: rux new + test
+        run: |
+          cargo run -p rux-cli -- new "$RUNNER_TEMP/hello-rux"
+          # Build against this commit, not rux from GitHub.
+          printf '\n[patch."https://github.com/anvuive456/rux"]\nrux = { path = "%s" }\n' "$GITHUB_WORKSPACE" >> "$RUNNER_TEMP/hello-rux/Cargo.toml"
+          cargo test --manifest-path "$RUNNER_TEMP/hello-rux/Cargo.toml"
+
   android:
     name: Android
     runs-on: ubuntu-latest
@@ -88,6 +96,16 @@ jobs:
           path: examples/counter/android/app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
 
+      # `rux new`: the generated Android project builds as is, outside the checkout.
+      - name: rux new + build APK
+        run: |
+          export ANDROID_NDK_HOME="$ANDROID_NDK_LATEST_HOME"
+          cargo run -p rux-cli -- new "$RUNNER_TEMP/hello-rux"
+          # Build against this commit, not rux from GitHub.
+          printf '\n[patch."https://github.com/anvuive456/rux"]\nrux = { path = "%s" }\n' "$GITHUB_WORKSPACE" >> "$RUNNER_TEMP/hello-rux/Cargo.toml"
+          cargo run -p rux-cli -- build android --path "$RUNNER_TEMP/hello-rux" --abi x86_64
+          cd "$RUNNER_TEMP/hello-rux/android" && ./gradlew assembleDebug --no-daemon
+
   ios:
     name: iOS
     runs-on: macos-latest
@@ -120,6 +138,22 @@ jobs:
           xcodebuild build \
             -project RuxCounter.xcodeproj \
             -scheme RuxCounter \
+            -sdk iphonesimulator \
+            -destination 'generic/platform=iOS Simulator' \
+            ARCHS=arm64 ONLY_ACTIVE_ARCH=NO \
+            CODE_SIGNING_ALLOWED=NO
+
+      # `rux new`: the generated iOS project builds as is, outside the checkout.
+      - name: rux new + build app (simulator)
+        run: |
+          cargo run -p rux-cli -- new "$RUNNER_TEMP/hello-rux"
+          # Build against this commit, not rux from GitHub.
+          printf '\n[patch."https://github.com/anvuive456/rux"]\nrux = { path = "%s" }\n' "$GITHUB_WORKSPACE" >> "$RUNNER_TEMP/hello-rux/Cargo.toml"
+          cargo run -p rux-cli -- build ios --path "$RUNNER_TEMP/hello-rux"
+          cd "$RUNNER_TEMP/hello-rux/ios" && xcodegen generate
+          xcodebuild build \
+            -project HelloRux.xcodeproj \
+            -scheme HelloRux \
             -sdk iphonesimulator \
             -destination 'generic/platform=iOS Simulator' \
             ARCHS=arm64 ONLY_ACTIVE_ARCH=NO \
