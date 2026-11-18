@@ -49,6 +49,9 @@ pub fn build(app: &AppCrate, release: bool) -> Result<()> {
     }
     cmd.arg("-output").arg(&out);
     run(&mut cmd)?;
+    // Which profile the xcframework holds: the Xcode project's pre-build check compares it
+    // with the configuration being built, so a Release build never links the debug library.
+    write_generated(&profile_marker(&out), &format!("{profile}\n"))?;
 
     println!("→ {}", out.display());
     if let Some(project) = super::project_dir(app) {
@@ -58,6 +61,11 @@ pub fn build(app: &AppCrate, release: bool) -> Result<()> {
         );
     }
     Ok(())
+}
+
+/// `<name>.profile` next to `<name>.xcframework`: `debug` or `release`.
+fn profile_marker(xcframework: &Path) -> std::path::PathBuf {
+    xcframework.with_extension("profile")
 }
 
 /// Writes `<ios>/rux.yml`, included by `project.yml`: the rux runtime Swift package, taken from

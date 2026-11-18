@@ -23,7 +23,13 @@ pub fn build(app: &AppCrate, release: bool, abis: &[String]) -> Result<()> {
     let sources = crate::native::generate_android(&deps, &project)?;
     write_config(&project, app, &deps.android_runtime()?, &sources)?;
     write_sdk_dir(&project)?;
-    let jni_libs = project.join("app/src/main/jniLibs");
+    // Per build type (Gradle merges `src/<buildType>/jniLibs`): a debug build never ends up in
+    // a release APK / bundle, and a release build doesn't replace the debug one.
+    let jni_libs = project
+        .join("app/src")
+        .join(if release { "release" } else { "debug" })
+        .join("jniLibs");
+    remove_legacy_libs(&project, &app.lib_name)?;
 
     let mut cmd = Command::new("cargo");
     cmd.arg("ndk")
@@ -49,6 +55,26 @@ pub fn build(app: &AppCrate, release: bool, abis: &[String]) -> Result<()> {
         app.lib_name,
         jni_libs.display()
     );
+    Ok(())
+}
+
+/// rux used to build into `src/main/jniLibs` for every build type; a library left there would
+/// clash with the per-build-type one when Gradle merges them.
+fn remove_legacy_libs(project: &Path, lib_name: &str) -> Result<()> {
+    let main = project.join("app/src/main/jniLibs");
+    let Ok(abis) = std::fs::read_dir(&main) else {
+        return Ok(());
+    };
+    for abi in abis.flatten() {
+        let lib = abi.path().join(format!("lib{lib_name}.so"));
+        if lib.is_file() {
+            std::fs::remove_file(&lib).with_context(|| format!("removing {}", lib.display()))?;
+            println!("→ removed {} (now built per build type)", lib.display());
+            // Keeps `jniLibs/<abi>` if it holds other libraries.
+            let _ = std::fs::remove_dir(abi.path());
+        }
+    }
+    let _ = std::fs::remove_dir(&main);
     Ok(())
 }
 
