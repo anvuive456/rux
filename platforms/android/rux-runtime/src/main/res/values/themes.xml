@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources xmlns:tools="http://schemas.android.com/tools">
+    <!--
+        Base theme of rux apps: Material 3, following the system light / dark mode.
+        Apps use it in their manifest (android:theme="@style/Theme.Rux"), or extend it to
+        set their own colors:
+
+        <style name="Theme.MyApp" parent="Theme.Rux">
+            <item name="colorPrimary">#3366FF</item>
+        </style>
+    -->
+    <style name="Theme.Rux" parent="Theme.Material3.DayNight.NoActionBar">
+        <!-- Dark status / navigation bar content in light mode, light content in dark mode
+             (Material 3 leaves it light in both). -->
+        <item name="android:windowLightStatusBar">?attr/isLightTheme</item>
+        <item name="android:windowLightNavigationBar" tools:targetApi="27">?attr/isLightTheme</item>
+    </style>
+</resources>

@@ -645,6 +645,25 @@ mod tests {
             render(&read("templates/app/android/settings.gradle.kts"), &vars),
             read("../../examples/counter/android/settings.gradle.kts"),
         );
+        // Theme (`Theme.Rux`) and activity glue.
+        let vars = [
+            ("display_name", "Rux Counter".to_owned()),
+            ("android_package", "dev.rux.examples.counter".to_owned()),
+            ("lib_name", "counter".to_owned()),
+        ];
+        assert_eq!(
+            render(
+                &read("templates/app/android/app/src/main/AndroidManifest.xml"),
+                &vars
+            ),
+            read("../../examples/counter/android/app/src/main/AndroidManifest.xml"),
+        );
+        assert_eq!(
+            render(&read("templates/app/android/MainActivity.kt.tmpl"), &vars),
+            read(
+                "../../examples/counter/android/app/src/main/java/dev/rux/examples/counter/MainActivity.kt"
+            ),
+        );
 
         // Same toolchain as rux itself (comments aside).
         let settings = |t: &str| -> Vec<String> {

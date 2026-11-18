@@ -17,3 +17,8 @@ android {
     }
 }
 
+dependencies {
+    // Material 3: the base theme (`Theme.Rux`) and the views RuxHost creates. `api` so apps
+    // can use and extend the theme in their manifest.
+    api("com.google.android.material:material:1.14.0")
+}

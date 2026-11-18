@@ -18,7 +18,7 @@
 //! Architecture:
 //! - [`rux_core`]: virtual [`Element`] tree, [`Reconciler`] diffs it into [`Mutation`]s.
 //! - [`rux_state`]: [`Signal`] — reactive state that schedules a re-render.
-//! - [`rux_ui`]: built-in widgets (`column`, `text`, `button`, ...).
+//! - [`rux_ui`]: built-in layouts and views (`column`, `text`, `button`, ...).
 //! - [`rux_platform`]: trait [`Renderer`](rux_platform::Renderer), [`Runtime`](rux_platform::Runtime),
 //!   and a headless renderer for tests.
 //! - `rux-android` / `rux-ios`: backends that apply mutations to Android Views / UIKit.
