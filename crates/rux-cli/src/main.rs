@@ -3,7 +3,7 @@
 //! Run inside the app crate directory (where `Cargo.toml` has `[package.metadata.rux]`):
 //!
 //! ```text
-//! rux setup [--no-modify-path]
+//! rux setup [--no-modify-path] [-y]
 //! rux new <dir> [--name <package>] [--app-id <id>]
 //! rux doctor
 //! rux build android [--release] [--abi arm64-v8a --abi x86_64]
@@ -30,6 +30,7 @@ mod ios;
 mod native;
 mod new;
 mod sdk;
+mod toolchain;
 mod util;
 mod version;
 
@@ -65,11 +66,15 @@ enum Cmd {
         app_id: Option<String>,
     },
     /// Install `rux` in ~/.rux/bin and put it on PATH, install the rux library (SDK) of this
-    /// CLI's version, and link it into the app in the current directory (or --path) if any.
+    /// CLI's version (linked into the app in the current directory / --path, if any), and the
+    /// Rust tools it builds with (Rust toolchain + targets, cargo-ndk; asks first).
     Setup {
         /// Don't change PATH (the shell startup files / the user `Path` on Windows).
         #[arg(long)]
         no_modify_path: bool,
+        /// Install the missing Rust tools without asking.
+        #[arg(long, short)]
+        yes: bool,
     },
     /// Check the required toolchains.
     Doctor,
@@ -123,7 +128,10 @@ fn main() -> Result<()> {
         Cmd::New { dir, name, app_id } => {
             new::run(&cli.path.join(dir), name.as_deref(), app_id.as_deref())
         }
-        Cmd::Setup { no_modify_path } => sdk::setup(&cli.path, !no_modify_path),
+        Cmd::Setup {
+            no_modify_path,
+            yes,
+        } => sdk::setup(&cli.path, !no_modify_path, yes),
         Cmd::Doctor => doctor::run(),
         Cmd::Build { platform, opts } => {
             let app = AppCrate::load(&cli.path)?;

@@ -50,8 +50,9 @@ pub fn home() -> Result<PathBuf> {
 }
 
 /// `rux setup`: installs the SDK, and links it into the app at `dir` if there is one.
-/// Also installs the CLI itself in `~/.rux/bin`, and puts it on PATH if `modify_path`.
-pub fn setup(dir: &Path, modify_path: bool) -> Result<()> {
+/// Also installs the CLI itself in `~/.rux/bin` (on PATH if `modify_path`), and the missing
+/// Rust tools (asking first unless `yes`).
+pub fn setup(dir: &Path, modify_path: bool, yes: bool) -> Result<()> {
     let dir = &std::path::absolute(dir)?;
     let home = home()?;
     crate::install::install_cli(&home, modify_path)?;
@@ -70,6 +71,7 @@ pub fn setup(dir: &Path, modify_path: bool) -> Result<()> {
             );
         }
     }
+    crate::toolchain::setup(yes)?;
     Ok(())
 }
 

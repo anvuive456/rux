@@ -2,6 +2,7 @@
 
 mod adb;
 mod build;
+pub mod java;
 mod run;
 pub mod sdk;
 
