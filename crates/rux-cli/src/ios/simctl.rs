@@ -66,21 +66,26 @@ impl Simulator {
             .arg(app))
     }
 
-    /// Launches (or relaunches) the app; `env` is passed to the app's process.
-    pub fn launch(&self, bundle_id: &str, env: &[(&str, &str)]) -> Result<()> {
+    /// `simctl` launching (or relaunching) the app; `env` is passed to the app's process. With
+    /// `console`, it stays attached to the app's stdout / stderr until the app exits.
+    pub fn launch_command(&self, bundle_id: &str, env: &[(&str, &str)], console: bool) -> Command {
         let mut cmd = Command::new("xcrun");
-        cmd.args([
-            "simctl",
-            "launch",
-            "--terminate-running-process",
-            &self.udid,
-            bundle_id,
-        ]);
+        cmd.args(["simctl", "launch", "--terminate-running-process"]);
+        if console {
+            // A pty, so the app's output is line-buffered (shows up right away).
+            cmd.arg("--console-pty");
+        }
+        cmd.args([&self.udid, bundle_id]);
         for (key, value) in env {
             // simctl forwards SIMCTL_CHILD_* variables to the launched app.
             cmd.env(format!("SIMCTL_CHILD_{key}"), value);
         }
-        run(&mut cmd)
+        cmd
+    }
+
+    /// Launches (or relaunches) the app, without attaching to it.
+    pub fn launch(&self, bundle_id: &str, env: &[(&str, &str)]) -> Result<()> {
+        run(&mut self.launch_command(bundle_id, env, false))
     }
 }
 

@@ -392,6 +392,7 @@ name = "rux-android"
 version = "0.1.0"
 dependencies = [
  "jni",
+ "libc",
  "rux-core",
  "rux-native",
  "rux-platform",
@@ -404,6 +405,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
+ "libc",
  "notify",
  "quote",
  "serde",

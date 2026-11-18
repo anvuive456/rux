@@ -127,12 +127,17 @@ rux build ios                           # → target/ios/counter.xcframework
 cd ios && xcodegen && open RuxCounter.xcodeproj
 ```
 
-Or build + install + launch on a simulator (the booted one, else the newest iPhone; `--device <name or
-UDID>` to choose):
+Or build + install + launch on a simulator (the booted one, else the newest iPhone), or on a
+connected iPhone / iPad with `--device <name or id>` (see `xcrun devicectl list devices`):
 
 ```sh
 rux run ios
+rux run ios --device "My iPhone"
 ```
+
+Device builds use Xcode's automatic signing. The team is `ios-development-team` in
+`[package.metadata.rux]` (also written to `rux.xcconfig`), else the only team among the Mac's
+Apple Development certificates.
 
 ### App id & version
 
@@ -165,11 +170,13 @@ between 1 and 2100000000 (Google Play's limit).
 
 ## Hot reload
 
-`rux run` (debug builds) stays attached to the app, like `flutter run`:
+`rux run` stays attached to the app, like `flutter run`: it streams the app's logs (Android:
+logcat of the app's process, including Rust's stdout / stderr; iOS: the app's stdout / stderr) and
+reads single-key commands. In debug builds it hot reloads:
 
 ```text
 🔥 Hot reload is on: save a file to hot reload.
-   r ⏎  hot reload (keep state)   R ⏎  hot restart   q ⏎  quit
+   r  hot reload (keep state)   R  hot restart   c  clear   h  help   q  quit (the app keeps running)
 ✓ hot reload: kept 2 state value(s) (691 ms)
 ```
 
@@ -185,7 +192,8 @@ How it works: the library the app starts with acts as a trampoline. The app's de
 (`RuxDevClient` in the Android / iOS runtimes, debug builds only) connects to the dev server of
 `rux run` (through `adb reverse` on Android), receives each new build, and the trampoline hands the
 app over to it (`rux_platform::dev`). Old builds stay loaded, so state created by them stays valid.
-Pass `--no-hot` to just launch the app. iOS hot reload works on the simulator.
+Pass `--no-hot` to stay attached without hot reload, or `--detach` to just launch the app. iOS hot
+reload works on the simulator (physical devices get logs only).
 
 ## Native APIs & plugins
 
@@ -276,5 +284,6 @@ gh pr create
 - [ ] State updates from other threads / async (marshalled to the UI thread)
 - [ ] Batch mutations into a single FFI call (fewer JNI crossings)
 - [ ] `rux new` (project template)
-- [ ] `rux run`: stream app logs, physical iOS devices (code signing), single-key commands
+- [x] `rux run`: stream app logs, physical iOS devices (code signing), single-key commands
+- [ ] Hot reload on physical iOS devices
 - [ ] Next platforms: macOS (AppKit), Windows (WinUI), Web (DOM)

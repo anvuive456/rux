@@ -1,12 +1,13 @@
 //! `rux run android`: builds the Rust library + APK, installs it with Gradle, launches it and
-//! (debug builds) runs the hot reload session.
+//! stays attached (logcat + hot reload in debug builds) unless detached.
 
 use std::path::Path;
 use std::process::Command;
+use std::time::{Duration, Instant};
 
 use anyhow::{Result, bail};
 
-use crate::hot::{self, DevServer};
+use crate::hot::{self, DevServer, HotReload, Logs};
 
 use super::adb::Adb;
 use super::sdk::android_studio_jdk;
@@ -22,6 +23,7 @@ pub fn run(
     abis: &[String],
     device: Option<&str>,
     hot: bool,
+    attach: bool,
 ) -> Result<()> {
     // Fail on config / device problems before the (slow) builds.
     let app_id = app.meta.android_app_id()?;
@@ -50,7 +52,7 @@ pub fn run(
     run_cmd(&mut cmd)?;
 
     // Hot reload: the app connects to our dev server through `adb reverse`.
-    let server = if hot && !release {
+    let server = if attach && hot && !release {
         let server = DevServer::bind()?;
         let port = format!("tcp:{}", server.port());
         output(adb.command().args(["reverse", &port, &port]))?;
@@ -73,16 +75,53 @@ pub fn run(
     }
     println!("→ launched {activity}");
 
-    let Some(server) = server else {
+    if !attach {
         return Ok(());
-    };
+    }
+    let logs = app_logs(&adb, app_id);
     let target_dir = app.target_dir()?;
-    let result = hot::session(app, &server, || {
-        super::build::hot_library(app, &device_abi, &target_dir)
-    });
-    let port = format!("tcp:{}", server.port());
-    let _ = output(adb.command().args(["reverse", "--remove", &port]));
+    let hot_reload = match &server {
+        Some(server) => HotReload::On {
+            server,
+            build: Box::new(|| super::build::hot_library(app, &device_abi, &target_dir)),
+        },
+        None if release => HotReload::Off("release build"),
+        None => HotReload::Off("--no-hot"),
+    };
+    let result = hot::session(app, hot_reload, logs);
+    if let Some(server) = &server {
+        let port = format!("tcp:{}", server.port());
+        let _ = output(adb.command().args(["reverse", "--remove", &port]));
+    }
     result
+}
+
+/// Streams the app process's logcat output (including Rust's stdout / stderr, which
+/// `rux-android` sends to logcat).
+fn app_logs(adb: &Adb, app_id: &str) -> Option<Logs> {
+    // The process may take a moment to start after `am start`.
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let pid = loop {
+        match adb.shell(&["pidof", "-s", app_id]) {
+            Ok(pid) if !pid.is_empty() => break pid,
+            _ if Instant::now() > deadline => {
+                println!("   ⚠ {app_id} is not running, so no logs");
+                return None;
+            }
+            _ => std::thread::sleep(Duration::from_millis(200)),
+        }
+    };
+    let pid = format!("--pid={pid}");
+    match Logs::spawn(
+        adb.command().args(["logcat", "-v", "tag", &pid]),
+        "logcat stopped",
+    ) {
+        Ok(logs) => Some(logs),
+        Err(e) => {
+            println!("   ⚠ can't stream the app's logs: {e:#}");
+            None
+        }
+    }
 }
 
 /// The project's Gradle wrapper (which reuses the Gradle in `~/.gradle/wrapper/dists` or

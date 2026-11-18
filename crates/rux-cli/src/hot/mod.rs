@@ -1,10 +1,13 @@
-//! The hot reload session of `rux run` (debug builds), like `flutter run`:
-//! saving a file hot reloads; `r` hot reloads, `R` hot restarts, `q` quits.
+//! The session `rux run` stays attached with, like `flutter run`: streams the app's logs and
+//! reads single-key commands; in debug builds, saving a file hot reloads, `r` hot reloads and
+//! `R` hot restarts. `q` detaches (the app keeps running).
 //!
 //! Each reload rebuilds only the app library, sends it to the app's dev client (see
 //! [`server`]), which loads it into the running process (`rux_platform::dev`). Hot reload
 //! keeps the app's state; hot restart constructs the app again.
 
+mod keys;
+mod logs;
 mod server;
 mod types;
 
@@ -17,9 +20,11 @@ use std::time::{Duration, Instant};
 use anyhow::{Context, Result};
 use notify::{EventKind, RecursiveMode, Watcher};
 
+pub use logs::Logs;
 pub use server::DevServer;
 
 use crate::app::AppCrate;
+use keys::Keys;
 
 /// How long the app has to connect after launch.
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
@@ -34,32 +39,45 @@ enum Mode {
 
 enum Input {
     Changed,
-    Key(String),
+    Key(char),
 }
 
-/// Runs the session until the user quits. `build` rebuilds the app library for the device
-/// and returns its path.
-pub fn session(
-    app: &AppCrate,
-    server: &DevServer,
-    mut build: impl FnMut() -> Result<PathBuf>,
-) -> Result<()> {
-    println!("→ waiting for the app to connect…");
-    server.wait_for_app(CONNECT_TIMEOUT)?;
+/// Whether the session can hot reload.
+pub enum HotReload<'a> {
+    /// The app's dev client connects to `server`; `build` rebuilds the app library for the
+    /// device and returns its path.
+    On {
+        server: &'a DevServer,
+        build: Box<dyn FnMut() -> Result<PathBuf> + 'a>,
+    },
+    /// Not available, with the reason shown to the user.
+    Off(&'static str),
+}
 
+/// Runs the session until the user quits. `logs` (the app's log stream) is printed meanwhile
+/// and stopped at the end.
+pub fn session(app: &AppCrate, hot: HotReload, logs: Option<Logs>) -> Result<()> {
     let (tx, rx) = mpsc::channel();
-    let _watcher = watch(&app.dir, tx.clone())?;
-    read_keys(tx);
+    let mut hot = match hot {
+        HotReload::On { server, build } => {
+            println!("→ waiting for the app to connect…");
+            server.wait_for_app(CONNECT_TIMEOUT)?;
+            let watcher = watch(&app.dir, tx.clone())?;
+            Ok((server, build, watcher))
+        }
+        HotReload::Off(why) => Err(why),
+    };
+    let keys = Keys::read(tx);
+    let help = help(&keys, hot.is_ok());
 
-    println!(
-        "\n🔥 Hot reload is on: save a file to hot reload.\n   \
-         r ⏎  hot reload (keep state)   R ⏎  hot restart   q ⏎  quit\n"
-    );
+    match &hot {
+        Ok(_) => println!("\n🔥 Hot reload is on: save a file to hot reload.\n{help}\n"),
+        Err(why) => println!("\nHot reload is off ({why}).\n{help}\n"),
+    }
     let mut types = types::fingerprint(&app.dir);
     // Sources as of the last build, to skip events that don't change anything (editors touching
     // files, events delivered late).
     let mut built_sources = sources_hash(&app.dir);
-    let mut reload = |mode: Mode| reload(app, server, &mut build, &mut types, mode);
     for input in &rx {
         let (mode, saved) = match input {
             Input::Changed => {
@@ -68,32 +86,63 @@ pub fn session(
                 while let Ok(Input::Changed) = rx.try_recv() {}
                 (Mode::Reload, true)
             }
-            Input::Key(key) => match key.as_str() {
-                "r" => (Mode::Reload, false),
-                "R" => (Mode::Restart, false),
-                "q" => break,
-                "" => continue,
-                _ => {
-                    println!("   r ⏎  hot reload   R ⏎  hot restart   q ⏎  quit");
-                    continue;
-                }
-            },
+            Input::Key('r') => (Mode::Reload, false),
+            Input::Key('R') => (Mode::Restart, false),
+            Input::Key('q') => break,
+            Input::Key('c') => {
+                print!("\x1b[2J\x1b[H");
+                continue;
+            }
+            Input::Key('h' | '?') => {
+                println!("{help}");
+                continue;
+            }
+            Input::Key(_) => continue,
+        };
+        let (server, build, _) = match &mut hot {
+            Ok(hot) => hot,
+            Err(why) => {
+                println!("   hot reload is off: {why}");
+                continue;
+            }
         };
         let sources = sources_hash(&app.dir);
         if saved && sources == built_sources {
             continue;
         }
         built_sources = sources;
-        reload(mode);
+        reload(app, server, build, &mut types, mode);
     }
-    println!("→ stopped hot reload (the app keeps running)");
+    drop(keys); // restore the terminal
+    drop(logs);
+    println!("→ detached (the app keeps running)");
     Ok(())
+}
+
+/// The list of commands.
+fn help(keys: &Keys, hot: bool) -> String {
+    let k = |c| keys.hint(c);
+    let mut help = String::from("   ");
+    if hot {
+        help += &format!(
+            "{}  hot reload (keep state)   {}  hot restart   ",
+            k('r'),
+            k('R')
+        );
+    }
+    help += &format!(
+        "{}  clear   {}  help   {}  quit (the app keeps running)",
+        k('c'),
+        k('h'),
+        k('q')
+    );
+    help
 }
 
 fn reload(
     app: &AppCrate,
     server: &DevServer,
-    build: &mut impl FnMut() -> Result<PathBuf>,
+    build: &mut Box<dyn FnMut() -> Result<PathBuf> + '_>,
     types: &mut types::Fingerprint,
     mode: Mode,
 ) {
@@ -174,16 +223,4 @@ fn watch(app_dir: &Path, tx: mpsc::Sender<Input>) -> Result<notify::RecommendedW
     watcher.watch(&app_dir.join("src"), RecursiveMode::Recursive)?;
     watcher.watch(&app_dir.join("Cargo.toml"), RecursiveMode::NonRecursive)?;
     Ok(watcher)
-}
-
-/// Reads commands from stdin (one per line).
-fn read_keys(tx: mpsc::Sender<Input>) {
-    std::thread::spawn(move || {
-        for line in std::io::stdin().lines() {
-            let Ok(line) = line else { break };
-            if tx.send(Input::Key(line.trim().to_owned())).is_err() {
-                break;
-            }
-        }
-    });
 }

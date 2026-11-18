@@ -8,6 +8,8 @@
 //!
 //! All calls happen on Android's main (UI) thread.
 
+mod logcat;
+
 use std::cell::{Cell, RefCell};
 use std::ffi::{CStr, c_char, c_void};
 
@@ -235,6 +237,7 @@ fn host_handle(env: &JNIEnv) -> Option<HostHandle> {
 
 /// Starts the app. Called from `RuxNative.nativeStart(host)`.
 pub fn start(mut env: JNIEnv, host: JObject, create_app: fn() -> Box<dyn App>) {
+    logcat::redirect_stdio();
     host::guard("nativeStart", || {
         let global = match env.new_global_ref(host) {
             Ok(g) => g,

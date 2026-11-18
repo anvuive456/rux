@@ -6,11 +6,12 @@
 //! rux doctor
 //! rux build android [--release] [--abi arm64-v8a --abi x86_64]
 //! rux build ios [--release]
-//! rux run android [--release] [--device <serial>] [--abi <abi>]
-//! rux run ios [--release] [--device <simulator name or UDID>]
+//! rux run android [--release] [--device <serial>] [--abi <abi>] [--no-hot] [--detach]
+//! rux run ios [--release] [--device <device / simulator name or id>] [--no-hot] [--detach]
 //! ```
 //!
-//! `rux run` in debug builds stays attached with hot reload, like `flutter run`.
+//! `rux run` stays attached like `flutter run`: it streams the app's logs, and debug builds
+//! hot reload.
 //!
 //! The app version (`version = "x.y.z+n"`) and application id (`app-id` in
 //! `[package.metadata.rux]`) come from Cargo.toml and are written to
@@ -59,15 +60,19 @@ enum Cmd {
         platform: Platform,
         #[command(flatten)]
         opts: BuildOpts,
-        /// Android: device serial (see `adb devices`). iOS: simulator name or UDID
-        /// (see `xcrun simctl list devices`). Default: the only connected Android device /
-        /// the booted simulator, else the newest iPhone simulator.
+        /// Android: device serial (see `adb devices`). iOS: name or id of a connected device
+        /// (see `xcrun devicectl list devices`) or simulator (see `xcrun simctl list devices`).
+        /// Default: the only connected Android device / the booted simulator, else the newest
+        /// iPhone simulator.
         #[arg(long, short)]
         device: Option<String>,
-        /// Just launch the app, without the hot reload session (debug builds have it by
-        /// default: save a file to hot reload; `r` hot reload, `R` hot restart, `q` quit).
+        /// Stay attached without hot reload (debug builds have it by default: save a file to
+        /// hot reload; `r` hot reload, `R` hot restart).
         #[arg(long)]
         no_hot: bool,
+        /// Just launch the app and exit, instead of staying attached (logs, hot reload).
+        #[arg(long, conflicts_with = "no_hot")]
+        detach: bool,
     },
 }
 
@@ -104,13 +109,16 @@ fn main() -> Result<()> {
             opts,
             device,
             no_hot,
+            detach,
         } => {
             let app = AppCrate::load(&cli.path)?;
             let device = device.as_deref();
-            let hot = !no_hot;
+            let (hot, attach) = (!no_hot, !detach);
             match platform {
-                Platform::Android => android::run(&app, opts.release, &opts.abis, device, hot),
-                Platform::Ios => ios::run(&app, opts.release, device, hot),
+                Platform::Android => {
+                    android::run(&app, opts.release, &opts.abis, device, hot, attach)
+                }
+                Platform::Ios => ios::run(&app, opts.release, device, hot, attach),
             }
         }
     }

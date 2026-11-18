@@ -20,6 +20,7 @@ rux-native = { path = "crates/rux-native", version = "0.1.0" }
 rux-macros = { path = "crates/rux-macros", version = "0.1.0" }
 
 jni = "0.21"
+libc = "0.2"
 anyhow = "1"
 clap = { version = "4", features = ["derive"] }
 serde = { version = "1", features = ["derive"] }

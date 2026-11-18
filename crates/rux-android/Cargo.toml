@@ -12,3 +12,6 @@ rux-platform.workspace = true
 rux-state.workspace = true
 rux-native.workspace = true
 jni.workspace = true
+
+[target.'cfg(target_os = "android")'.dependencies]
+libc.workspace = true
