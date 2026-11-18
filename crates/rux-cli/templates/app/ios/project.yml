@@ -32,6 +32,21 @@ targets:
         CFBundleDisplayName: "{{display_name}}"
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+    # The Rust library in the xcframework must be built for the configuration being built
+    # (`rux build ios` / `rux build ios --release`), so a Release build never links the debug one.
+    preBuildScripts:
+      - name: Check rux library
+        basedOnDependencyAnalysis: false
+        inputFiles:
+          - "$(SRCROOT)/{{xcframework}}/../{{lib_name}}.profile"
+        script: |
+          marker="$SRCROOT/{{xcframework}}/../{{lib_name}}.profile"
+          if [ "$CONFIGURATION" = Release ]; then want=release; flag=" --release"; else want=debug; flag=""; fi
+          have=$(cat "$marker" 2>/dev/null)
+          if [ "$have" != "$want" ]; then
+            echo "error: the Rust library ({{xcframework}}) is a ${have:-missing} build, $CONFIGURATION needs $want: run \`rux build ios$flag\`."
+            exit 1
+          fi
     dependencies:
       - package: RuxRuntime
       - framework: "{{xcframework}}"

@@ -9,7 +9,8 @@ build/
 local.properties
 .idea/
 *.iml
-**/src/main/jniLibs/
+**/src/debug/jniLibs/
+**/src/release/jniLibs/
 rux.properties
 rux-generated/
 

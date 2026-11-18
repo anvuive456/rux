@@ -47,8 +47,9 @@ rux build android                          # arm64-v8a
 rux build android --abi arm64-v8a --abi x86_64
 ```
 
-This builds `lib<name>.so` into `android/app/src/main/jniLibs/<abi>/` and writes the files Gradle
-reads (`android/rux.properties`, `local.properties`). Then build the APK with Gradle, or open
+This builds `lib<name>.so` into `android/app/src/debug/jniLibs/<abi>/` (with `--release`:
+`android/app/src/release/jniLibs/<abi>/`, the one release APKs and bundles get) and writes the
+files Gradle reads (`android/rux.properties`, `local.properties`). Then build the APK with Gradle, or open
 `android/` in Android Studio and Run:
 
 ```sh

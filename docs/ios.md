@@ -44,3 +44,8 @@ cd ios && xcodegen && open *.xcodeproj
 `rux build ios` builds the Rust library for devices and simulators (arm64) into an xcframework, and
 writes the files the Xcode project reads (`ios/rux.xcconfig`, `ios/rux.yml`). Run it before
 `xcodegen`.
+
+The xcframework holds one profile at a time: `rux build ios` for the Debug configuration,
+`rux build ios --release` for Release (archives for TestFlight / the App Store). The project's
+"Check rux library" build phase fails the build if they don't match, so a release never ships the
+debug library.
