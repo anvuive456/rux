@@ -1,6 +1,7 @@
 package dev.rux.runtime
 
 import android.content.Context
+import android.content.pm.ApplicationInfo
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
@@ -19,24 +20,56 @@ import java.util.concurrent.CountDownLatch
  * Protocol (one connection, line-based headers):
  * - server → app: `reload <size>\n` or `restart <size>\n`, then `<size>` bytes of the library;
  * - app → server: one report line, `ok …` or `err …`.
+ *
+ * The server address is never taken from the launch Intent (any app can launch the exported
+ * activity with any extras, and the client loads code it receives). `rux run` writes it to
+ * [ADDRESS_FILE] in the app's private files with `adb shell run-as`, which only adb (or the
+ * app itself) can do, and removes it when the session ends. Only debuggable apps connect, and
+ * only to a loopback address (`adb reverse`).
  */
 internal object RuxDevClient {
-    /** Intent extra carrying the server address (`host:port`), set by `rux run`. */
-    const val EXTRA = "rux.devServer"
+    /** File in [Context.getFilesDir] holding the server address (`host:port`). */
+    private const val ADDRESS_FILE = "rux-dev-server"
     private const val TAG = "rux"
 
     @Volatile private var started = false
 
-    /** Starts the client once per process (the Activity may be recreated). */
-    fun connect(context: Context, address: String) {
+    /** Starts the client once per process (the Activity may be recreated), if `rux run` asked. */
+    fun connect(context: Context) {
+        if (context.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE == 0) return
         if (started) return
         started = true
         val appContext = context.applicationContext
-        Thread({ run(appContext, address) }, "rux-dev").apply { isDaemon = true }.start()
+        Thread({
+            try {
+                address(appContext)?.let { run(appContext, it) }
+            } finally {
+                started = false
+            }
+        }, "rux-dev").apply { isDaemon = true }.start()
     }
 
-    private fun run(context: Context, address: String) {
-        val (host, port) = address.split(':').let { it[0] to it[1].toInt() }
+    /** The dev server address `rux run` left for this launch, if any (loopback only). */
+    private fun address(context: Context): Pair<String, Int>? {
+        val text = try {
+            File(context.filesDir, ADDRESS_FILE).readText().trim()
+        } catch (_: IOException) {
+            return null // not launched by `rux run` with hot reload
+        }
+        val host = text.substringBeforeLast(':', "")
+        val port = text.substringAfterLast(':', "").toIntOrNull()
+        if (host !in LOOPBACK || port == null) {
+            Log.w(TAG, "hot reload: ignoring dev server address \"$text\" (not a loopback address)")
+            return null
+        }
+        return host to port
+    }
+
+    private val LOOPBACK = setOf("127.0.0.1", "localhost", "::1")
+
+    private fun run(context: Context, server: Pair<String, Int>) {
+        val (host, port) = server
+        val address = "$host:$port"
         // Builds are written next to each other: a loaded library can't be replaced in place.
         val dir = File(context.codeCacheDir, "rux-hot").apply {
             deleteRecursively()
@@ -74,8 +107,6 @@ internal object RuxDevClient {
             }
         } catch (e: IOException) {
             Log.w(TAG, "hot reload: disconnected from $address: ${e.message}")
-        } finally {
-            started = false
         }
     }
 
