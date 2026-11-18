@@ -84,9 +84,10 @@ jobs:
         run: |
           "target/${{ matrix.target }}/release/rux" --version
           export RUX_HOME="$RUNNER_TEMP/rux-home"
-          # Like a user: run the downloaded binary's setup (installs itself + the SDK, edits
-          # PATH: shell startup files / the user Path on Windows — this runner is throwaway).
-          (cd "$RUNNER_TEMP" && "$GITHUB_WORKSPACE/target/${{ matrix.target }}/release/rux" setup)
+          # Like a user: run the downloaded binary's setup (installs itself + the SDK + the Rust
+          # tools, edits PATH: shell startup files / the user Path on Windows — this runner is
+          # throwaway).
+          (cd "$RUNNER_TEMP" && "$GITHUB_WORKSPACE/target/${{ matrix.target }}/release/rux" setup -y)
           rux="$RUX_HOME/bin/rux"
           "$rux" --version
           if [[ "$RUNNER_OS" == Windows ]]; then
@@ -97,7 +98,10 @@ jobs:
           fi
           # The embedded SDK is linked and complete enough to build an app.
           "$rux" new "$RUNNER_TEMP/smoke-app"
-          "$rux" doctor
+          "$rux" doctor | tee "$RUNNER_TEMP/doctor.txt"
+          # `setup -y` installed the Rust tools.
+          grep -F '[ok] cargo-ndk' "$RUNNER_TEMP/doctor.txt"
+          grep -F '[ok] aarch64-linux-android' "$RUNNER_TEMP/doctor.txt"
           cargo check --manifest-path "$RUNNER_TEMP/smoke-app/Cargo.toml" --all-targets
 
       - name: Package

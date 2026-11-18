@@ -23,12 +23,14 @@ pub const SDK_HINT: &str = "Android SDK not found: install Android Studio, or se
 /// Studio's default location.
 pub fn sdk_dirs() -> Vec<PathBuf> {
     let home = std::env::var_os("HOME").map(PathBuf::from);
+    let local_app_data = std::env::var_os("LOCALAPPDATA").map(PathBuf::from);
     let mut dirs: Vec<PathBuf> = Vec::new();
     let candidates = ["ANDROID_HOME", "ANDROID_SDK_ROOT"]
         .iter()
         .filter_map(|v| std::env::var_os(v).map(PathBuf::from))
         .chain(home.iter().map(|h| h.join("Library/Android/sdk"))) // macOS
-        .chain(home.iter().map(|h| h.join("Android/Sdk"))); // Linux
+        .chain(home.iter().map(|h| h.join("Android/Sdk"))) // Linux
+        .chain(local_app_data.iter().map(|d| d.join("Android").join("Sdk"))); // Windows
     for dir in candidates {
         if dir.is_dir() && !dirs.contains(&dir) {
             dirs.push(dir);
@@ -109,12 +111,8 @@ fn install_ndk(sdk: &Path, version: &str) -> Result<()> {
         let mut cmd = Command::new(sdkmanager);
         cmd.arg(format!("--sdk_root={}", sdk.display()))
             .arg(format!("ndk;{version}"));
-        // sdkmanager is a Java program; fall back to Android Studio's bundled JDK.
-        if std::env::var_os("JAVA_HOME").is_none()
-            && let Some(jbr) = android_studio_jdk()
-        {
-            cmd.env("JAVA_HOME", jbr);
-        }
+        // sdkmanager is a Java program.
+        super::java::configure(&mut cmd);
         cmd
     } else {
         bail!(
@@ -125,12 +123,6 @@ fn install_ndk(sdk: &Path, version: &str) -> Result<()> {
         );
     };
     run(&mut cmd).context("installing the Android NDK")
-}
-
-/// Android Studio's bundled JDK (macOS), used when no JDK is configured.
-pub fn android_studio_jdk() -> Option<PathBuf> {
-    let home = PathBuf::from("/Applications/Android Studio.app/Contents/jbr/Contents/Home");
-    (cfg!(target_os = "macos") && home.is_dir()).then_some(home)
 }
 
 /// A complete NDK install has `source.properties` at its root (an empty or half-downloaded

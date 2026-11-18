@@ -111,7 +111,10 @@ Expand-Archive rux.zip -DestinationPath rux
   PATH: the user `Path` on Windows; on macOS / Linux, a line sourcing `~/.rux/env` in `~/.profile`,
   `~/.bashrc`, `~/.zshenv` (bash / zsh) and `~/.config/fish/conf.d/rux.fish` (fish). Open a new
   terminal afterwards. `--no-modify-path` leaves PATH alone;
-- installs the rux library (the SDK) of the CLI's version in `~/.rux/sdk/<version>` (see below).
+- installs the rux library (the SDK) of the CLI's version in `~/.rux/sdk/<version>` (see below);
+- installs the Rust tools rux builds with, if missing: the Rust version rux pins, with the
+  Android (and, on macOS, iOS) targets, and `cargo-ndk`. It lists them and asks first; `-y` installs without asking.
+  Rust itself comes from [rustup](https://rustup.rs).
 
 `$RUX_HOME` replaces `~/.rux`. Every release lists the archives' checksums in `SHA256SUMS`. On
 macOS, an archive downloaded with a browser is quarantined: run `xattr -d com.apple.quarantine rux`
@@ -163,8 +166,11 @@ runtimes from the `rux` crate cargo resolved for the app (written to `android/ru
 
 ### Android
 
-Requires the Android SDK + NDK, `cargo install cargo-ndk`, and
-`rustup target add aarch64-linux-android x86_64-linux-android`.
+Requires Android Studio (or the Android SDK), plus the Rust tools `rux setup` installs (Android
+targets, `cargo-ndk`). No environment variables needed: `rux` finds the SDK in Android Studio's
+default location (`ANDROID_HOME` overrides it), and Gradle / the SDK tools run on Android Studio's
+bundled JDK unless `JAVA_HOME` or a `java` on PATH says otherwise (Gradle needs Java 17+;
+`rux doctor` shows which one is used).
 Building Rust for Android needs the NDK (a separate package from the SDK). Like Flutter's
 `ndkVersion`, you don't install it yourself: `rux` uses the newest NDK in your SDK, and if there is
 none, installs a pinned version on the first `rux build android` (via the SDK's command-line tools).
@@ -189,7 +195,7 @@ The Android project ships a Gradle wrapper (`gradlew`, pinned Gradle version, re
 
 ### iOS (macOS only)
 
-Requires Xcode, `rustup target add aarch64-apple-ios aarch64-apple-ios-sim`, and `brew install xcodegen`.
+Requires Xcode, `brew install xcodegen`, and the iOS targets `rux setup` installs.
 
 ```sh
 cd examples/counter

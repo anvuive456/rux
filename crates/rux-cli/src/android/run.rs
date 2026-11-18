@@ -10,9 +10,8 @@ use anyhow::{Result, bail};
 use crate::hot::{self, DevServer, HotReload, Logs};
 
 use super::adb::Adb;
-use super::sdk::android_studio_jdk;
 use crate::app::AppCrate;
-use crate::util::{has, on_path, output, run as run_cmd};
+use crate::util::{on_path, output, run as run_cmd};
 
 /// Intent extra the app's dev client reads the server address from (`RuxDevClient.EXTRA`).
 const DEV_SERVER_EXTRA: &str = "rux.devServer";
@@ -126,7 +125,7 @@ fn app_logs(adb: &Adb, app_id: &str) -> Option<Logs> {
 
 /// The project's Gradle wrapper (which reuses the Gradle in `~/.gradle/wrapper/dists` or
 /// downloads it once) if present, else `gradle` from `PATH`. Runs on Android Studio's bundled
-/// JDK when no JDK is configured.
+/// JDK when no JDK is configured (see `java`).
 fn gradle(project: &Path) -> Result<Command> {
     let wrapper = project.join(if cfg!(windows) {
         "gradlew.bat"
@@ -143,12 +142,7 @@ fn gradle(project: &Path) -> Result<Command> {
             project.display()
         );
     };
-    if std::env::var_os("JAVA_HOME").is_none()
-        && !has("java", "-version")
-        && let Some(jdk) = android_studio_jdk()
-    {
-        cmd.env("JAVA_HOME", jdk);
-    }
+    super::java::configure(&mut cmd);
     Ok(cmd)
 }
 
