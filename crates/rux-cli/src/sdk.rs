@@ -8,8 +8,8 @@
 //! rux = { version = "=0.2.0", path = ".rux/sdk" }
 //! ```
 //!
-//! Like Flutter's SDK, nothing is published to a registry; unlike it, each app states the
-//! version it needs, and a CLI of another version refuses to build it.
+//! Nothing is published to a registry. Each app states the version it needs, and a CLI of
+//! another version refuses to build it.
 
 use std::path::{Path, PathBuf};
 
@@ -244,6 +244,7 @@ mod tests {
     fn embeds_the_sdk() {
         let has = |p: &str| embedded::FILES.iter().any(|(f, _)| *f == p);
         assert!(has("Cargo.toml") && has("src/lib.rs"));
+        assert!(has("LICENSE-APACHE") && has("LICENSE-MIT"));
         assert!(has("crates/rux-core/Cargo.toml"));
         assert!(has("platforms/android/rux-runtime/build.gradle.kts"));
         assert!(has("platforms/ios/Package.swift"));

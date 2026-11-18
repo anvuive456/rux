@@ -37,7 +37,7 @@ proc-macro2 = "1"
 # ---------------------------------------------------------------------------
 [package]
 name = "rux"
-description = "Write UI once in Rust, render with each platform's native widgets."
+description = "Write UI once in Rust, render it with each platform's own native UI."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

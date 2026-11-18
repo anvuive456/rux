@@ -12,7 +12,7 @@
 //! rux run ios [--release] [--device <device / simulator name or id>] [--no-hot] [--detach]
 //! ```
 //!
-//! `rux run` stays attached like `flutter run`: it streams the app's logs, and debug builds
+//! `rux run` stays attached: it streams the app's logs, and debug builds
 //! hot reload.
 //!
 //! The app version (`version = "x.y.z+n"`) and application id (`app-id` in

@@ -111,11 +111,13 @@ jobs:
           dir=target/${{ matrix.target }}/release
           name=rux-${{ matrix.target }}
           if [[ "${{ matrix.target }}" == *windows* ]]; then
-            pwsh -Command "Compress-Archive -Path $dir/rux.exe -DestinationPath dist/$name.zip"
+            pwsh -Command "Compress-Archive -Path $dir/rux.exe, LICENSE-APACHE, LICENSE-MIT -DestinationPath dist/$name.zip"
           else
-            tar -czf "dist/$name.tar.gz" -C "$dir" rux
+            tar -czf "dist/$name.tar.gz" -C "$dir" rux -C "$GITHUB_WORKSPACE" LICENSE-APACHE LICENSE-MIT
           fi
           ls -l dist
+          # The archive holds the binary and the licenses.
+          if [[ "${{ matrix.target }}" == *windows* ]]; then unzip -l "dist/$name.zip"; else tar -tzvf "dist/$name.tar.gz"; fi
 
       - uses: actions/upload-artifact@v4
         with:

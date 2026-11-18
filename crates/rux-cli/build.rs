@@ -29,9 +29,12 @@ fn main() {
         "rux-cli must be built inside the rux repository (it embeds the rux SDK)"
     );
 
-    // The facade crate (root), its sibling crates (but not this one) and the runtimes.
+    // The facade crate (root), its sibling crates (but not this one), the runtimes, and the
+    // licenses they're distributed under.
     let mut sources = vec![
         root.join("Cargo.toml"),
+        root.join("LICENSE-APACHE"),
+        root.join("LICENSE-MIT"),
         root.join("src"),
         root.join("platforms"),
     ];

@@ -1,4 +1,4 @@
-//! {{display_name}} — the app entry point (like `main.dart` in Flutter).
+//! {{display_name}} — the app entry point.
 //!
 //! - `state/`: app data, one file per piece of state.
 //! - `views/`: UI, one file per view.

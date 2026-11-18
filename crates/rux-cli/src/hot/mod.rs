@@ -1,4 +1,4 @@
-//! The session `rux run` stays attached with, like `flutter run`: streams the app's logs and
+//! The session `rux run` stays attached with: streams the app's logs and
 //! reads single-key commands; in debug builds, saving a file hot reloads, `r` hot reloads and
 //! `R` hot restarts. `q` detaches (the app keeps running).
 //!

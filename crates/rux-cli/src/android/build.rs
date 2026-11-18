@@ -105,8 +105,8 @@ fn escape_property(value: &str) -> String {
     value.replace('\\', "\\\\").replace(':', "\\:")
 }
 
-/// Points Gradle at the Android SDK (`sdk.dir` in `<android>/local.properties`), like Flutter
-/// and Android Studio do, keeping the file's other entries.
+/// Points Gradle at the Android SDK (`sdk.dir` in `<android>/local.properties`), like Android
+/// Studio does, keeping the file's other entries.
 fn write_sdk_dir(project: &Path) -> Result<()> {
     let sdk = sdk_dirs().into_iter().next().context(SDK_HINT)?;
     let path = project.join("local.properties");

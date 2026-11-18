@@ -1,99 +1,75 @@
+<div align="center">
+
 # rux
 
-[![CI](https://github.com/anvuive456/rux/actions/workflows/ci.yml/badge.svg)](https://github.com/anvuive456/rux/actions/workflows/ci.yml)
+**Write your app's UI once in Rust. Render it with each platform's own native UI.**
 
-A cross-platform UI framework: **write your UI once in Rust, render it with native widgets** on each
-platform (Android `View`, iOS `UIKit`). There is no custom canvas/GPU renderer — apps look and behave
-like native apps.
+[![CI](https://github.com/anvuive456/rux/actions/workflows/ci.yml/badge.svg)](https://github.com/anvuive456/rux/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/anvuive456/rux?include_prereleases&sort=semver)](https://github.com/anvuive456/rux/releases/latest)
+[![License](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue)](#license)
+
+[Getting started](docs/getting-started.md) ·
+[Guides](#documentation) ·
+[Examples](examples) ·
+[Roadmap](#roadmap) ·
+[Contributing](CONTRIBUTING.md)
+
+</div>
+
+> [!WARNING]
+> rux is in early development. APIs change between releases, and only the basics (stacks, text,
+> buttons, text inputs) are in place. It's ready to experiment with, not to ship apps.
+
+rux is a cross-platform UI framework for Android and iOS. Your app's state and UI live in one Rust
+crate; rux turns them into real `android.view.View`s and `UIView`s: no canvas, no WebView, no
+custom renderer. Apps look, scroll and behave the way the platform does, and one CLI creates, runs
+and hot reloads them.
 
 ```rust
 use rux::prelude::*;
 
-struct Counter { count: Signal<i32> }
+struct Counter {
+    count: Signal<i32>,
+}
 
 impl App for Counter {
     fn view(&self) -> Element {
-        let inc = self.count.clone();
+        let count = self.count.clone();
         column([
             text(format!("Count: {}", self.count.get())).font_size(28.0),
-            button("+", move || inc.update(|c| *c += 1)),
+            button("+1", move || count.update(|c| *c += 1)),
         ])
         .padding(16.0)
+        .spacing(8.0)
     }
 }
 
 rux::main!(|| Counter { count: Signal::new(0) });
 ```
 
-## Architecture
+## Why rux?
 
-```text
-          Rust (single source)                                Native host
-┌──────────────────────────────────────────┐         ┌───────────────────────────────┐
-│ App::view() → Element (virtual tree)     │         │                               │
-│        │                                 │         │ Android: RuxHost.kt (View)    │
-│        ▼                                 │Mutation │ iOS:     RuxHost.swift (UIKit)│
-│ Reconciler (diff) → Vec<Mutation> ───────┼────────►│                               │
-│        ▲                                 │         │                               │
-│ Signal::set ◄─ handler ◄─ dispatch ◄─────┼─────────┤ click / change                │
-└──────────────────────────────────────────┘  Event  └───────────────────────────────┘
-```
+- **Truly native UI.** Text fields, buttons and scroll views are the platform's own, so text
+  editing, accessibility and the look and feel come for free.
+- **One Rust codebase.** State, logic and UI are shared; the Android and iOS projects are thin
+  shells that `rux` generates and keeps in sync.
+- **Reactive state.** Update a `Signal` and only what changed is patched in the native view tree.
+- **Hot reload.** `rux run` rebuilds on save and swaps the new code into the running app,
+  keeping its state.
+- **Native APIs without glue code.** Declare an API in Rust; rux generates the Kotlin interface
+  and the Swift protocol to implement, and the calls in between.
+- **Tested without an emulator.** Headless UI tests click and inspect your UI with `cargo test`.
+- **One version.** The `rux` CLI ships the rux library of its own version, so the tool and the
+  framework never drift apart.
 
-All Rust ↔ native communication goes through the `Mutation` enum (create / set_prop / insert_child /
-remove_child / release / set_root / listen) and `Event`. Adding a platform means implementing these
-9 operations natively plus a `Renderer` on the Rust side.
+## Quick start
 
-| Crate / directory               | Role |
-|---------------------------------|------|
-| `rux` (root)                    | Facade: re-exports + the `rux::main!` macro that generates per-platform entry points |
-| `crates/rux-core`               | `Element`, `Mutation`, `Reconciler` (keyed diffing) — platform independent |
-| `crates/rux-state`              | `Signal<T>` — reactive state that schedules re-renders |
-| `crates/rux-ui`                 | Widgets: `column`, `row`, `view`, `scroll`, `text`, `button`, `text_input` |
-| `crates/rux-platform`           | `Renderer` trait, `Runtime`, per-UI-thread runtime, `testing::Harness` (headless) |
-| `crates/rux-android`            | Android backend: calls `RuxHost` (Kotlin) over JNI |
-| `crates/rux-ios`                | iOS backend: calls a C vtable provided by Swift |
-| `crates/rux-native`             | Calling native code: codec, sync / async calls, test mocks (`rux::native`) |
-| `crates/rux-macros`             | `#[rux::host_api]`, `#[rux::async_call]`, `#[derive(NativeType)]` |
-| `crates/rux-cli`                | The `rux` CLI (embeds the SDK): `setup`, `new`, `doctor`, `build`, `run` (android / ios), native API codegen |
-| `platforms/android/rux-runtime` | Shared Android library (Kotlin): `RuxNative`, `RuxHost` |
-| `platforms/ios`                 | Swift package `RuxRuntime`: `rux.h` + `RuxHost` |
-| `examples/counter`              | Sample app + Android / iOS projects |
-| `examples/device-info`          | Sample plugin: device info (sync) + battery (async) in Kotlin / Swift |
-
-## App layout
-
-Like Flutter: shared Rust code in `src/`, tests in `tests/`, native shells in `android/` and `ios/`.
-
-```text
-examples/counter/
-├── Cargo.toml          # version = "x.y.z+n"; [package.metadata.rux]: app-id, android/ and ios/ paths
-├── src/
-│   ├── lib.rs          # entry point (like main.dart): root App + rux::main!
-│   ├── state/          # one file per piece of state
-│   │   ├── counter.rs
-│   │   └── profile.rs
-│   └── views/          # one file per view
-│       ├── home.rs
-│       ├── counter_view.rs
-│       └── greeting_view.rs
-├── tests/              # headless UI tests
-│   ├── counter_test.rs
-│   └── greeting_test.rs
-├── android/            # Gradle project (shell only)
-└── ios/                # XcodeGen project (shell only)
-```
-
-## Getting started
-
-### Install the `rux` CLI
-
-Download the archive for your platform from the
-[latest release](https://github.com/anvuive456/rux/releases/latest) (macOS arm64 / x64, Linux
-x64 / arm64, Windows x64), extract it anywhere, and run its `setup`:
+Install the `rux` CLI from the [latest release](https://github.com/anvuive456/rux/releases/latest)
+(macOS, Linux and Windows) and run its setup. It puts `rux` on your PATH and installs the rux
+library and the Rust tools it needs (you need [Rust](https://rustup.rs) first):
 
 ```sh
-# macOS (Apple silicon); other archives: rux-x86_64-apple-darwin.tar.gz,
-# rux-x86_64-unknown-linux-musl.tar.gz, rux-aarch64-unknown-linux-musl.tar.gz
+# macOS (Apple silicon) — see the release for other platforms
 curl -fsSL https://github.com/anvuive456/rux/releases/latest/download/rux-aarch64-apple-darwin.tar.gz | tar -xz
 ./rux setup
 ```
@@ -105,280 +81,72 @@ Expand-Archive rux.zip -DestinationPath rux
 .\rux\rux.exe setup
 ```
 
-`rux setup`, like rustup:
-
-- installs `rux` in `~/.rux/bin` (the downloaded file can then go) and puts that directory on your
-  PATH: the user `Path` on Windows; on macOS / Linux, a line sourcing `~/.rux/env` in `~/.profile`,
-  `~/.bashrc`, `~/.zshenv` (bash / zsh) and `~/.config/fish/conf.d/rux.fish` (fish). Open a new
-  terminal afterwards. `--no-modify-path` leaves PATH alone;
-- installs the rux library (the SDK) of the CLI's version in `~/.rux/sdk/<version>` (see below);
-- installs the Rust tools rux builds with, if missing: the Rust version rux pins, with the
-  Android (and, on macOS, iOS) targets, and `cargo-ndk`. It lists them and asks first; `-y` installs without asking.
-  Rust itself comes from [rustup](https://rustup.rs).
-
-`$RUX_HOME` replaces `~/.rux`. Every release lists the archives' checksums in `SHA256SUMS`. On
-macOS, an archive downloaded with a browser is quarantined: run `xattr -d com.apple.quarantine rux`
-first.
-
-Or build it from source: `cargo install --path crates/rux-cli`, then `rux setup` (it doesn't copy
-a `rux` that's already on PATH).
-
-Then check your toolchains:
+Then, in a new terminal:
 
 ```sh
-rux doctor
+rux doctor            # checks Android Studio, Xcode and friends
+rux new my_app        # creates my_app/: Rust code, tests, Android and iOS projects
+cd my_app
+cargo test            # headless UI tests
+rux run android       # or: rux run ios — builds, launches, hot reloads on save
 ```
 
-### One version: the CLI and the SDK
+See [Getting started](docs/getting-started.md) for the details.
 
-Like Flutter's SDK, rux isn't published to a package registry: the `rux` CLI embeds the rux SDK
-(the `rux` crate, the crates it depends on and the Android / iOS runtimes) of its own version, so
-the tool and the library can't drift apart. `rux setup` installs it in `~/.rux/sdk/<version>` (or
-`$RUX_HOME/sdk/<version>`), and links it into an app as `.rux/sdk` (gitignored), which the app
-depends on:
+## Platforms
 
-```toml
-[dependencies]
-rux = { version = "=0.2.0", path = ".rux/sdk" }
-```
+| Platform | Status | Renders with | Requires |
+|----------|--------|--------------|----------|
+| Android  | ✅ Supported (API 24+) | `android.view.View` | Android Studio |
+| iOS      | ✅ Supported (iOS 15+) | UIKit | macOS, Xcode, XcodeGen |
+| macOS, Windows, Web | 🗓 Planned | AppKit, WinUI, DOM | |
 
-- `rux new` does this for you; after cloning an app, run `rux setup` once (like `flutter pub get`).
-- `rux build` / `rux run` relink the SDK when it's missing or outdated.
-- The app states its rux version: a `rux` CLI of another version refuses to build it and says
-  which release to install, or how to move the app to the CLI's version (change `=0.2.0`).
+Apps are built from Windows, macOS or Linux; iOS apps need a Mac.
 
-### New app
+## Documentation
 
-```sh
-rux new my-app                         # → my-app/: Cargo.toml, src/, tests/, android/, ios/
-cd my-app
-cargo test                             # headless UI tests
-rux run android                        # or: rux run ios
-```
+| Guide | |
+|-------|-|
+| [Getting started](docs/getting-started.md) | Install, create an app, the project layout, the rux SDK |
+| [Android](docs/android.md) | Building and running on emulators and devices |
+| [iOS](docs/ios.md) | Building and running on simulators and devices, signing |
+| [App configuration](docs/configuration.md) | App id, version and `[package.metadata.rux]` |
+| [Hot reload](docs/hot-reload.md) | `rux run`, logs, hot reload and hot restart |
+| [Native APIs & plugins](docs/native-apis.md) | Calling Kotlin / Swift from Rust, writing plugins |
+| [Testing](docs/testing.md) | Headless UI tests, mocking native APIs |
+| [Architecture](docs/architecture.md) | How rux works, crate by crate |
 
-The app has the same layout as `examples/counter` (see [App layout](#app-layout)). Options:
-`--name <package>` (default: the directory's name), `--app-id <id>` (default:
-`com.example.<name>`).
+## Examples
 
-The app uses the rux SDK of the CLI's version (see above). `rux build` takes the Android / iOS
-runtimes from the `rux` crate cargo resolved for the app (written to `android/rux.properties` and
-`ios/rux.yml`), so they always match the Rust side.
-
-### Android
-
-Requires Android Studio (or the Android SDK), plus the Rust tools `rux setup` installs (Android
-targets, `cargo-ndk`). No environment variables needed: `rux` finds the SDK in Android Studio's
-default location (`ANDROID_HOME` overrides it), and Gradle / the SDK tools run on Android Studio's
-bundled JDK unless `JAVA_HOME` or a `java` on PATH says otherwise (Gradle needs Java 17+;
-`rux doctor` shows which one is used).
-Building Rust for Android needs the NDK (a separate package from the SDK). Like Flutter's
-`ndkVersion`, you don't install it yourself: `rux` uses the newest NDK in your SDK, and if there is
-none, installs a pinned version on the first `rux build android` (via the SDK's command-line tools).
-Pin an exact version with `android-ndk-version = "…"` in `[package.metadata.rux]`, or point
-`ANDROID_NDK_HOME` at an NDK to override.
-
-```sh
-cd examples/counter
-rux build android --abi arm64-v8a --abi x86_64   # → android/app/src/main/jniLibs/<abi>/libcounter.so
-```
-
-Open `examples/counter/android` in Android Studio and Run, or build + install + launch from the
-terminal on a running emulator / connected device:
-
-```sh
-rux run android                 # only builds the device's ABI; --device <serial> if several are connected
-```
-
-The Android project ships a Gradle wrapper (`gradlew`, pinned Gradle version, reused from
-`~/.gradle` if already downloaded), and `rux build android` writes `sdk.dir` into
-`local.properties`, so neither Gradle nor `ANDROID_HOME` has to be set up by hand.
-
-### iOS (macOS only)
-
-Requires Xcode, `brew install xcodegen`, and the iOS targets `rux setup` installs.
-
-```sh
-cd examples/counter
-rux build ios                           # → target/ios/counter.xcframework
-cd ios && xcodegen && open RuxCounter.xcodeproj
-```
-
-Or build + install + launch on a simulator (the booted one, else the newest iPhone), or on a
-connected iPhone / iPad with `--device <name or id>` (see `xcrun devicectl list devices`):
-
-```sh
-rux run ios
-rux run ios --device "My iPhone"
-```
-
-Device builds use Xcode's automatic signing. The team is `ios-development-team` in
-`[package.metadata.rux]` (also written to `rux.xcconfig`), else the only team among the Mac's
-Apple Development certificates.
-
-### App id & version
-
-Like Flutter's `pubspec.yaml`, the application id and version live in one place — the app's
-`Cargo.toml`:
-
-```toml
-[package]
-version = "1.2.3+45"   # version name 1.2.3, build number 45 (`+n` defaults to 1)
-
-[package.metadata.rux]
-app-id = "com.example.myapp"           # Android applicationId + iOS bundle identifier
-# android-app-id = "com.example.myapp" # optional per-platform overrides
-# ios-bundle-id = "com.example.myapp"
-```
-
-`rux build` generates the per-platform files from it (they are gitignored, don't edit them):
-
-| Platform | Generated file           | `app-id`                    | Version name                 | Build number      |
-|----------|--------------------------|-----------------------------|------------------------------|-------------------|
-| Android  | `android/rux.properties` | `applicationId`             | `versionName`                | `versionCode`     |
-| iOS      | `ios/rux.xcconfig`       | `PRODUCT_BUNDLE_IDENTIFIER` | `CFBundleShortVersionString` | `CFBundleVersion` |
-
-A shared `app-id` must be valid on both platforms: `.`-separated segments starting with a letter,
-using only letters and digits (Android forbids `-`, iOS forbids `_`). Use the per-platform keys if
-you need either character.
-
-The version name must be three numbers (iOS rejects suffixes like `-beta`); the build number must be
-between 1 and 2100000000 (Google Play's limit).
-
-## Hot reload
-
-`rux run` stays attached to the app, like `flutter run`: it streams the app's logs (Android:
-logcat of the app's process, including Rust's stdout / stderr; iOS: the app's stdout / stderr) and
-reads single-key commands. In debug builds it hot reloads:
-
-```text
-🔥 Hot reload is on: save a file to hot reload.
-   r  hot reload (keep state)   R  hot restart   c  clear   h  help   q  quit (the app keeps running)
-✓ hot reload: kept 2 state value(s) (691 ms)
-```
-
-- **Save a file / `r`: hot reload.** Only the app library is rebuilt; the running app loads it
-  (`dlopen`) without being reinstalled or relaunched, and keeps its state: every `Signal` created
-  while constructing the app is handed over to the new build, matched by creation order and type.
-- **`R`: hot restart.** Same, but the app is constructed from scratch.
-- If a `struct` / `enum` definition (or `Cargo.toml`) changed, or the app's signals no longer
-  match (added, removed, retyped), `rux run` does a hot restart instead and says why.
-- A build error is reported and the app keeps running; save again once it's fixed.
-
-How it works: the library the app starts with acts as a trampoline. The app's dev client
-(`RuxDevClient` in the Android / iOS runtimes, debug builds only) connects to the dev server of
-`rux run` (through `adb reverse` on Android), receives each new build, and the trampoline hands the
-app over to it (`rux_platform::dev`). Old builds stay loaded, so state created by them stays valid.
-Pass `--no-hot` to stay attached without hot reload, or `--detach` to just launch the app. iOS hot
-reload works on the simulator (physical devices get logs only).
-
-## Native APIs & plugins
-
-Like Flutter's [Pigeon](https://pub.dev/packages/pigeon): declare an API once in Rust, implement it
-in Kotlin / Swift, call it from Rust with types on every side.
-
-**1. Declare** (in the app or a plugin crate):
-
-```rust
-#[derive(NativeType)]
-pub struct Battery { pub level: Option<i32>, pub state: BatteryState }
-
-#[rux::host_api]
-pub trait DeviceInfoApi {
-    fn info(&self) -> Result<DeviceInfo, NativeError>;   // sync
-    #[rux::async_call]
-    fn battery(&self) -> Result<Battery, NativeError>;   // async
-}
-```
-
-**2. Implement** the interface / protocol `rux build` generates from it (in
-`<android|ios>/rux-generated/`, package `dev.rux.generated.<crate_name>` on Android):
-
-```kotlin
-class DeviceInfoApiImpl(private val context: Context) : DeviceInfoApi {
-    override fun info() = DeviceInfo(platform = "Android", /* … */)
-    override fun battery(callback: (Result<Battery>) -> Unit) { /* … */ callback(Result.success(battery)) }
-}
-```
-```swift
-final class DeviceInfoApiImpl: DeviceInfoApi {
-    func info() throws -> DeviceInfo { /* … */ }
-    func battery(completion: @escaping (Result<Battery, Error>) -> Void) { /* … */ }
-}
-```
-
-**3. Register** the implementations in `Cargo.toml` — `rux build` generates a registrant that
-`RuxHost` runs at startup (Android: constructed with the Activity as `Context`; iOS: `init()`):
-
-```toml
-[package.metadata.rux.native]
-DeviceInfoApi = { android = "dev.rux.plugins.deviceinfo.DeviceInfoApiImpl", ios = "DeviceInfoApiImpl" }
-
-[package.metadata.rux.plugin]   # plugins only: where their Kotlin / Swift sources live
-android = "android"
-ios = "ios"
-```
-
-**4. Call** it from Rust:
-
-```rust
-let info = DeviceInfoApi::new().info()?;                       // returns right away
-DeviceInfoApi::new().battery(move |b| battery.set(Some(b)));   // callback on the UI thread
-```
-
-A plugin is just a crate with all of the above (see `examples/device-info`); an app depends on it
-and `rux build` picks it up. Since Rust, Kotlin and Swift all run on the UI thread, a sync call is a
-plain nested call (no thread hop). Supported types: `bool`, `i32`, `i64`, `f64`, `String`,
-`Option<T>`, `Vec<T>`, `()`, and `#[derive(NativeType)]` structs (named fields) / enums (unit
-variants). In headless tests, fake the native side with `rux::native::testing::mock`. Changing a
-`#[host_api]` declaration needs a full `rux run` (hot reload warns about it).
-
-## UI tests without an emulator
-
-```rust
-let mut h = rux::testing::Harness::new(CounterApp::new());
-h.click_text("+");
-assert!(h.dump().contains(r#"text="Count: 1""#));
-```
-
-## Contributing
-
-`main` is protected: every change lands through a pull request, and CI (Rust, Android, iOS) must pass
-before merging.
-
-```sh
-git switch -c feat/my-feature
-# ...commit...
-git push -u origin feat/my-feature
-gh pr create
-```
-
-```sh
-cargo test --workspace                 # runs all tests, including the headless UI tests in examples/counter
-```
-
-### Releasing
-
-1. Bump `version` in `[workspace.package]` (root `Cargo.toml`) through a pull request.
-2. Once it's merged, tag `main` with the same version and push the tag:
-
-   ```sh
-   git switch main && git pull
-   git tag v0.2.0 && git push origin v0.2.0
-   ```
-
-The [Release workflow](.github/workflows/release.yml) checks that the tag matches the version,
-builds `rux` (embedding the SDK) for macOS (arm64, x64), Linux (x64, arm64; static musl) and
-Windows (x64), smoke-tests it (`rux new` + `cargo check` of the app), and publishes a GitHub Release with the archives, `SHA256SUMS` and
-generated notes. Tags with a suffix (`v0.2.0-beta.1`) become pre-releases.
+- [`examples/counter`](examples/counter): a small app with state, several views, headless tests
+  and a native API call.
+- [`examples/device-info`](examples/device-info): a plugin with a sync and an async native API,
+  implemented in Kotlin and Swift.
 
 ## Roadmap
 
-- [ ] Layout: flexbox (alignment, weight, sizing) — currently only stacks + padding/spacing
-- [ ] More widgets: image, virtualized list (RecyclerView / UICollectionView), switch, ...
-- [ ] Components with local state & fine-grained updates instead of re-rendering the whole `view()`
-- [ ] State updates from other threads / async (marshalled to the UI thread)
-- [ ] Batch mutations into a single FFI call (fewer JNI crossings)
-- [x] `rux new` (project template)
-- [x] `rux run`: stream app logs, physical iOS devices (code signing), single-key commands
-- [ ] Hot reload on physical iOS devices
-- [ ] Next platforms: macOS (AppKit), Windows (WinUI), Web (DOM)
+- [ ] Layout: alignment, weights and sizing; today only stacks with padding and spacing
+- [ ] More UI elements: image, virtualized lists (RecyclerView / UICollectionView), switch, …
+- [ ] Components with local state and fine-grained updates instead of re-rendering `view()`
+- [ ] State updates from other threads / async code
+- [ ] Batching mutations into one FFI call
+- [ ] Hot reload on physical iOS devices (simulators and Android work today)
+- [ ] More platforms: macOS (AppKit), Windows (WinUI), Web (DOM)
+
+## Contributing
+
+Contributions are welcome: see [CONTRIBUTING.md](CONTRIBUTING.md) for building rux from source,
+running the tests and how changes land.
+
+## License
+
+rux is licensed under either of
+
+- the Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE)), or
+- the MIT license ([LICENSE-MIT](LICENSE-MIT)),
+
+at your option.
+
+Unless you explicitly state otherwise, any contribution intentionally submitted for inclusion in
+rux by you, as defined in the Apache-2.0 license, shall be dual licensed as above, without any
+additional terms or conditions.
