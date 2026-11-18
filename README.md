@@ -87,32 +87,43 @@ examples/counter/
 
 ### Install the `rux` CLI
 
-Download it from the [latest release](https://github.com/anvuive456/rux/releases/latest) (macOS
-arm64 / x64, Linux x64 / arm64, Windows x64), or with a shell:
+Download the archive for your platform from the
+[latest release](https://github.com/anvuive456/rux/releases/latest) (macOS arm64 / x64, Linux
+x64 / arm64, Windows x64), extract it anywhere, and run its `setup`:
 
 ```sh
 # macOS (Apple silicon); other archives: rux-x86_64-apple-darwin.tar.gz,
 # rux-x86_64-unknown-linux-musl.tar.gz, rux-aarch64-unknown-linux-musl.tar.gz
-curl -fsSL https://github.com/anvuive456/rux/releases/latest/download/rux-aarch64-apple-darwin.tar.gz \
-  | tar -xz -C ~/.local/bin                # any directory on your PATH
+curl -fsSL https://github.com/anvuive456/rux/releases/latest/download/rux-aarch64-apple-darwin.tar.gz | tar -xz
+./rux setup
 ```
 
 ```powershell
 # Windows
 Invoke-WebRequest https://github.com/anvuive456/rux/releases/latest/download/rux-x86_64-pc-windows-msvc.zip -OutFile rux.zip
-Expand-Archive rux.zip -DestinationPath "$HOME\.rux\bin"   # then add it to PATH
+Expand-Archive rux.zip -DestinationPath rux
+.\rux\rux.exe setup
 ```
 
-Every release lists the archives' checksums in `SHA256SUMS`. On macOS, an archive downloaded with
-a browser is quarantined: run `xattr -d com.apple.quarantine rux` once.
+`rux setup`, like rustup:
 
-Or build it from source: `cargo install --path crates/rux-cli`.
+- installs `rux` in `~/.rux/bin` (the downloaded file can then go) and puts that directory on your
+  PATH: the user `Path` on Windows; on macOS / Linux, a line sourcing `~/.rux/env` in `~/.profile`,
+  `~/.bashrc`, `~/.zshenv` (bash / zsh) and `~/.config/fish/conf.d/rux.fish` (fish). Open a new
+  terminal afterwards. `--no-modify-path` leaves PATH alone;
+- installs the rux library (the SDK) of the CLI's version in `~/.rux/sdk/<version>` (see below).
 
-Then install the rux library (the SDK) and check your toolchains:
+`$RUX_HOME` replaces `~/.rux`. Every release lists the archives' checksums in `SHA256SUMS`. On
+macOS, an archive downloaded with a browser is quarantined: run `xattr -d com.apple.quarantine rux`
+first.
+
+Or build it from source: `cargo install --path crates/rux-cli`, then `rux setup` (it doesn't copy
+a `rux` that's already on PATH).
+
+Then check your toolchains:
 
 ```sh
-rux setup                              # installs the rux SDK of the CLI's version in ~/.rux/sdk/<version>
-rux doctor                             # checks your toolchains
+rux doctor
 ```
 
 ### One version: the CLI and the SDK

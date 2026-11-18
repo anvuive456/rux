@@ -50,9 +50,12 @@ pub fn home() -> Result<PathBuf> {
 }
 
 /// `rux setup`: installs the SDK, and links it into the app at `dir` if there is one.
-pub fn setup(dir: &Path) -> Result<()> {
+/// Also installs the CLI itself in `~/.rux/bin`, and puts it on PATH if `modify_path`.
+pub fn setup(dir: &Path, modify_path: bool) -> Result<()> {
     let dir = &std::path::absolute(dir)?;
-    let (sdk, fresh) = install(&home()?)?;
+    let home = home()?;
+    crate::install::install_cli(&home, modify_path)?;
+    let (sdk, fresh) = install(&home)?;
     if !fresh {
         println!("✓ rux SDK {VERSION} is installed in {}", sdk.display());
     }

@@ -82,10 +82,20 @@ jobs:
         if: ${{ !matrix.cross }}
         shell: bash
         run: |
-          rux=target/${{ matrix.target }}/release/rux
-          "$rux" --version
-          # The embedded SDK is installed, linked and complete enough to build an app.
+          "target/${{ matrix.target }}/release/rux" --version
           export RUX_HOME="$RUNNER_TEMP/rux-home"
+          # Like a user: run the downloaded binary's setup (installs itself + the SDK, edits
+          # PATH: shell startup files / the user Path on Windows — this runner is throwaway).
+          (cd "$RUNNER_TEMP" && "$GITHUB_WORKSPACE/target/${{ matrix.target }}/release/rux" setup)
+          rux="$RUX_HOME/bin/rux"
+          "$rux" --version
+          if [[ "$RUNNER_OS" == Windows ]]; then
+            powershell -NoProfile -Command "[Environment]::GetEnvironmentVariable('Path', 'User')" | grep -F 'rux-home\bin'
+          else
+            grep -F "$RUX_HOME/env" ~/.profile
+            (. "$RUX_HOME/env" && command -v rux)
+          fi
+          # The embedded SDK is linked and complete enough to build an app.
           "$rux" new "$RUNNER_TEMP/smoke-app"
           "$rux" doctor
           cargo check --manifest-path "$RUNNER_TEMP/smoke-app/Cargo.toml" --all-targets
