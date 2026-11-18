@@ -49,7 +49,6 @@ class RuxHost(private val hostContext: Context, private val container: ViewGroup
         RuxNative.nativeStart(this)
         // Hot reload, when launched by `rux run` (debug builds only; see RuxDevClient).
         RuxDevClient.connect(hostContext)
-
     }
     fun stop() = RuxNative.nativeStop()
 
