@@ -50,7 +50,15 @@ class RuxHost(private val hostContext: Context, private val container: ViewGroup
         // Hot reload, when launched by `rux run` (debug builds only; see RuxDevClient).
         RuxDevClient.connect(hostContext)
     }
-    fun stop() = RuxNative.nativeStop()
+    /**
+     * Stops the app (call from `onDestroy`). If the Activity is only being recreated for a
+     * configuration change (rotation, dark mode, locale, font size, …), the app keeps running
+     * and the new Activity's [start] takes it over with its state.
+     */
+    fun stop() {
+        if ((hostContext as? android.app.Activity)?.isChangingConfigurations == true) return
+        RuxNative.nativeStop()
+    }
 
     // --- mutation protocol ---------------------------------------------------
 

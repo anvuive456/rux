@@ -246,16 +246,27 @@ pub fn start(mut env: JNIEnv, host: JObject, create_app: fn() -> Box<dyn App>) {
                 return;
             }
         };
-        HOST.with(|h| *h.borrow_mut() = Some(global));
-        // After a hot reload (e.g. the Activity is recreated), keep running the newest build.
+        // After a hot reload, keep running the newest build. If the Activity was recreated for
+        // a configuration change (`RuxHost.stop` then doesn't stop the app), its state moves
+        // over to the new Activity.
         if let Some(lib) = dev::active() {
+            let previous = lib.stop();
+            HOST.with(|h| *h.borrow_mut() = Some(global));
             let Some(handle) = host_handle(&env) else {
                 return;
             };
             // SAFETY: `handle` is this backend's host handle and outlives the call.
-            if let Err(e) = unsafe { lib.start(&raw const handle as *const c_void, Vec::new()) } {
+            if let Err(e) = unsafe { lib.start(&raw const handle as *const c_void, previous) } {
                 eprintln!("[rux] {e}");
             }
+            return;
+        }
+        // Activity recreated for a configuration change (rotation, dark mode, locale, …): the
+        // app is still running; move it to the new Activity's views, keeping its state.
+        let running = with_renderer(&mut env, |r| host::unmount(r)).unwrap_or(false);
+        HOST.with(|h| *h.borrow_mut() = Some(global));
+        if running {
+            with_renderer(&mut env, |r| host::mount(r));
             return;
         }
         install_native(&mut env);
