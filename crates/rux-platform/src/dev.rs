@@ -8,7 +8,8 @@
 //! - `rux_dev_start(host, prev, prev_len, msg, msg_cap) -> u32` — start the app on the given
 //!   platform host (backend-specific handle), adopting the previous build's signals;
 //! - `rux_dev_dispatch(id, event, value)` — a native event;
-//! - `rux_dev_stop(&mut len) -> *const HotSignal` — tear down, returning the app's signals.
+//! - `rux_dev_stop(&mut len) -> *const HotSignal` — tear down, returning the app's signals;
+//! - `rux_dev_reply(call_id, ptr, len)` — a native API reply (see `rux_native`).
 //!
 //! Builds are never unloaded: adopted signals, closures and `&'static str`s may point into them.
 
@@ -29,6 +30,7 @@ type StartFn = unsafe extern "C" fn(
 ) -> u32;
 type DispatchFn = unsafe extern "C" fn(id: u64, event: *const c_char, value: *const c_char);
 type StopFn = unsafe extern "C" fn(len: *mut usize) -> *const HotSignal;
+type ReplyFn = unsafe extern "C" fn(call_id: u64, payload: *const u8, len: usize);
 
 /// Status codes returned by `rux_dev_start`.
 const FRESH: u32 = 0;
@@ -76,6 +78,7 @@ pub struct HotLib {
     start: StartFn,
     dispatch: DispatchFn,
     stop: StopFn,
+    reply: ReplyFn,
 }
 
 thread_local! {
@@ -127,6 +130,12 @@ impl HotLib {
         let value_ptr = value.as_ref().map_or(std::ptr::null(), |v| v.as_ptr());
         // SAFETY: the strings outlive the call.
         unsafe { (self.dispatch)(id, event.as_ptr(), value_ptr) }
+    }
+
+    /// Forwards a native API reply to this build.
+    pub fn reply(&self, call_id: u64, payload: &[u8]) {
+        // SAFETY: the slice outlives the call.
+        unsafe { (self.reply)(call_id, payload.as_ptr(), payload.len()) }
     }
 
     /// Stops the app in this build, returning its signals.
@@ -195,10 +204,14 @@ fn load(path: &str) -> Result<&'static HotLib, String> {
         let stop = *lib
             .get::<StopFn>(b"rux_dev_stop\0")
             .map_err(|e| e.to_string())?;
+        let reply = *lib
+            .get::<ReplyFn>(b"rux_dev_reply\0")
+            .map_err(|e| e.to_string())?;
         Ok(Box::leak(Box::new(HotLib {
             start,
             dispatch,
             stop,
+            reply,
         })))
     }
 }

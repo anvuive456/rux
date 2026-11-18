@@ -29,6 +29,8 @@ class RuxHost(private val context: Context, private val container: ViewGroup) {
     private var applying = false
 
     fun start() {
+        // Native API implementations (re-registered when the Activity is recreated).
+        RuxChannels.registerGenerated(context)
         RuxNative.nativeStart(this)
         // `rux run` passes its dev server address to debug builds (hot reload).
         (context as? android.app.Activity)?.intent?.getStringExtra(RuxDevClient.EXTRA)?.let {

@@ -11,6 +11,8 @@ crate-type = ["lib", "cdylib", "staticlib"]
 
 [dependencies]
 rux.workspace = true
+# Example plugin: native device info / battery (see ../device-info).
+rux-device-info = { path = "../device-info" }
 
 # Configuration for the `rux` CLI.
 [package.metadata.rux]

@@ -10,24 +10,27 @@ pub mod views;
 
 use rux::prelude::*;
 
-use state::{CounterState, ProfileState};
+use state::{CounterState, DeviceState, ProfileState};
 
 /// Root app: owns the state and renders the home screen.
 #[derive(Default)]
 pub struct CounterApp {
     counter: CounterState,
     profile: ProfileState,
+    device: DeviceState,
 }
 
 impl CounterApp {
     pub fn new() -> Self {
-        Self::default()
+        let app = Self::default();
+        app.device.load_info();
+        app
     }
 }
 
 impl App for CounterApp {
     fn view(&self) -> Element {
-        views::home(&self.counter, &self.profile)
+        views::home(&self.counter, &self.profile, &self.device)
     }
 }
 

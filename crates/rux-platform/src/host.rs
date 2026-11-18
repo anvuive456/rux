@@ -36,6 +36,19 @@ pub fn dispatch(id: NodeId, event: &Event, renderer: &mut dyn Renderer) -> bool 
     })
 }
 
+/// Re-renders if state changed outside an event (e.g. in an async native call's callback).
+/// No-op while the runtime is busy (the change is picked up by the render in progress).
+pub fn refresh(renderer: &mut dyn Renderer) {
+    RUNTIME.with(|rt| {
+        if let Ok(mut guard) = rt.try_borrow_mut()
+            && let Some(runtime) = guard.as_mut()
+            && rux_state::take_dirty()
+        {
+            runtime.render(renderer);
+        }
+    });
+}
+
 /// Releases the runtime's native nodes and drops it (hot reload hands over to a new build).
 pub fn teardown(renderer: &mut dyn Renderer) {
     if let Some(mut runtime) = RUNTIME.with(|rt| rt.borrow_mut().take()) {

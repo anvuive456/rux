@@ -36,8 +36,14 @@ public final class RuxHost {
             release_node: { ctx, id in RuxHost.from(ctx).releaseNode(id) },
             set_root: { ctx, id in RuxHost.from(ctx).setRoot(id) },
             listen: { ctx, id, event in RuxHost.from(ctx).listen(id, String(cString: event)) },
-            unlisten: { ctx, id, event in RuxHost.from(ctx).unlisten(id, String(cString: event)) }
+            unlisten: { ctx, id, event in RuxHost.from(ctx).unlisten(id, String(cString: event)) },
+            invoke_native: { _, api, method, callId, args, count in
+                let data = args.map { Data(bytes: $0, count: count) } ?? Data()
+                RuxChannels.invoke(String(cString: api), Int32(bitPattern: method), callId, data)
+            }
         )
+        // Native API implementations.
+        RuxChannels.registerGenerated()
         rux_start(vtable)
         #if DEBUG
         // `rux run` passes its dev server address to debug builds (hot reload).

@@ -10,3 +10,4 @@ license.workspace = true
 rux-core.workspace = true
 rux-platform.workspace = true
 rux-state.workspace = true
+rux-native.workspace = true

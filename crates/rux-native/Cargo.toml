@@ -1,0 +1,9 @@
+[package]
+name = "rux-native"
+description = "Calling native (Kotlin / Swift) code from rux apps: the runtime behind #[rux::host_api]."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]

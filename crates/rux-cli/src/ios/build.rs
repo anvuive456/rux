@@ -14,6 +14,7 @@ pub fn build(app: &AppCrate, release: bool) -> Result<()> {
     }
     if let Some(project) = super::project_dir(app) {
         write_config(&project, app)?;
+        crate::native::generate_ios(app, &project)?;
     }
     let profile = if release { "release" } else { "debug" };
     let target_dir = app.target_dir()?;

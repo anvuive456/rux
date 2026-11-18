@@ -22,6 +22,7 @@ mod app_id;
 mod doctor;
 mod hot;
 mod ios;
+mod native;
 mod util;
 mod version;
 

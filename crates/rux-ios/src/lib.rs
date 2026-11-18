@@ -35,6 +35,68 @@ pub struct RuxHostVTable {
     pub set_root: unsafe extern "C" fn(Ctx, u64),
     pub listen: unsafe extern "C" fn(Ctx, u64, *const c_char),
     pub unlisten: unsafe extern "C" fn(Ctx, u64, *const c_char),
+    /// A native API call (`rux::native`): `RuxChannels.invoke` answers with `rux_native_reply`.
+    pub invoke_native: unsafe extern "C" fn(Ctx, *const c_char, u32, u64, *const u8, usize),
+}
+
+/// Native API calls → the vtable's `invoke_native` (Swift `RuxChannels`).
+struct VTableTransport;
+
+impl rux_native::Transport for VTableTransport {
+    fn invoke(&self, api: &str, method: u32, call_id: u64, args: &[u8]) {
+        let Some(v) = VTABLE.with(Cell::get) else {
+            return;
+        };
+        let api = cstr(api);
+        // SAFETY: the pointers outlive the call; Swift copies what it keeps.
+        unsafe {
+            (v.invoke_native)(
+                v.ctx,
+                api.as_ptr(),
+                method,
+                call_id,
+                args.as_ptr(),
+                args.len(),
+            )
+        };
+    }
+}
+
+/// A native API reply: completes the call, re-rendering if an async callback changed state.
+fn deliver(call_id: u64, payload: &[u8]) {
+    if rux_native::deliver(call_id, payload)
+        && let Some(vtable) = VTABLE.with(Cell::get)
+    {
+        host::refresh(&mut VTableRenderer(vtable));
+    }
+}
+
+/// Reply to a native API call. Called from `rux_native_reply` (Swift `RuxReply`).
+///
+/// # Safety
+/// `payload` must point to `len` readable bytes (or be null with `len == 0`).
+pub unsafe fn reply(call_id: u64, payload: *const u8, len: usize) {
+    host::guard("rux_native_reply", || {
+        let payload = if payload.is_null() {
+            &[][..]
+        } else {
+            unsafe { std::slice::from_raw_parts(payload, len) }
+        };
+        match dev::active() {
+            Some(lib) => lib.reply(call_id, payload),
+            None => deliver(call_id, payload),
+        }
+    });
+}
+
+/// `rux_dev_reply`: a native API reply forwarded by the trampoline.
+///
+/// # Safety
+/// `payload` must point to `len` readable bytes.
+pub unsafe fn dev_reply(call_id: u64, payload: *const u8, len: usize) {
+    host::guard("rux_dev_reply", || {
+        deliver(call_id, unsafe { std::slice::from_raw_parts(payload, len) })
+    });
 }
 
 thread_local! {
@@ -106,6 +168,7 @@ pub fn start(vtable: RuxHostVTable, create_app: fn() -> Box<dyn App>) {
             }
             return;
         }
+        rux_native::set_transport(Some(Box::new(VTableTransport)));
         let (app, _) = dev::create_app(create_app, Vec::new());
         host::install(Runtime::new(app), &mut VTableRenderer(vtable));
     });
@@ -156,6 +219,7 @@ pub fn stop() {
             None => host::uninstall(),
         }
         VTABLE.with(|v| v.set(None));
+        rux_native::set_transport(None);
     });
 }
 
@@ -210,6 +274,7 @@ pub unsafe fn dev_start(
         dev::export_start(prev, prev_len, msg, msg_cap, |previous| {
             let vtable = *handle.cast::<RuxHostVTable>();
             VTABLE.with(|v| v.set(Some(vtable)));
+            rux_native::set_transport(Some(Box::new(VTableTransport)));
             let (app, started) = dev::create_app(create_app, previous);
             host::install(Runtime::new(app), &mut VTableRenderer(vtable));
             started
@@ -244,6 +309,8 @@ pub unsafe fn dev_stop(len: *mut usize) -> *const HotSignal {
                 host::teardown(&mut VTableRenderer(vtable));
             }
             VTABLE.with(|v| v.set(None));
+            rux_native::set_transport(None);
+            rux_native::set_transport(None);
         })
     }
 }

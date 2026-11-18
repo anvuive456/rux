@@ -1,0 +1,19 @@
+[package]
+name = "rux-device-info"
+description = "Example rux plugin: device information (sync) and battery state (async) from native code."
+version = "0.1.0"
+edition.workspace = true
+publish = false
+
+[dependencies]
+rux.workspace = true
+
+# Implementation class of each #[rux::host_api] trait, per platform.
+# Android: constructed with the Activity (`Context`); iOS: `init()`.
+[package.metadata.rux.native]
+DeviceInfoApi = { android = "dev.rux.plugins.deviceinfo.DeviceInfoApiImpl", ios = "DeviceInfoApiImpl" }
+
+# Where the native implementations live; `rux build` adds them to the app.
+[package.metadata.rux.plugin]
+android = "android"
+ios = "ios"
