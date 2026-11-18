@@ -11,7 +11,7 @@ use crate::app::AppCrate;
 use crate::util::output;
 
 /// `ios-development-team` from Cargo.toml, else the only team among this Mac's valid Apple
-/// development certificates (like Flutter).
+/// development certificates.
 pub fn development_team(app: &AppCrate) -> Result<String> {
     if let Some(team) = &app.meta.ios_development_team {
         return Ok(team.clone());

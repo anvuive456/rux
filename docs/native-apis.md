@@ -1,7 +1,7 @@
 # Native APIs & plugins
 
-Like Flutter's [Pigeon](https://pub.dev/packages/pigeon): declare an API once in Rust, implement it
-in Kotlin and Swift, and call it from Rust, with types on every side.
+Declare an API once in Rust, implement it in Kotlin and Swift, and call it from Rust, with types on
+every side.
 
 ## 1. Declare
 

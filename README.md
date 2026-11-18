@@ -2,7 +2,7 @@
 
 # rux
 
-**Write your app's UI once in Rust. Render it with each platform's native widgets.**
+**Write your app's UI once in Rust. Render it with each platform's own native UI.**
 
 [![CI](https://github.com/anvuive456/rux/actions/workflows/ci.yml/badge.svg)](https://github.com/anvuive456/rux/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/anvuive456/rux?include_prereleases&sort=semver)](https://github.com/anvuive456/rux/releases/latest)
@@ -22,8 +22,8 @@
 
 rux is a cross-platform UI framework for Android and iOS. Your app's state and UI live in one Rust
 crate; rux turns them into real `android.view.View`s and `UIView`s: no canvas, no WebView, no
-custom renderer. Apps look, scroll and behave the way the platform does, and the tooling feels like
-Flutter's: one CLI to create, run and hot reload apps.
+custom renderer. Apps look, scroll and behave the way the platform does, and one CLI creates, runs
+and hot reloads them.
 
 ```rust
 use rux::prelude::*;
@@ -49,7 +49,7 @@ rux::main!(|| Counter { count: Signal::new(0) });
 
 ## Why rux?
 
-- **Native widgets.** Text fields, buttons and scroll views are the platform's own, so text
+- **Truly native UI.** Text fields, buttons and scroll views are the platform's own, so text
   editing, accessibility and the look and feel come for free.
 - **One Rust codebase.** State, logic and UI are shared; the Android and iOS projects are thin
   shells that `rux` generates and keeps in sync.
@@ -125,8 +125,8 @@ Apps are built from Windows, macOS or Linux; iOS apps need a Mac.
 
 ## Roadmap
 
-- [ ] Layout: flexbox (alignment, weight, sizing); today only stacks with padding and spacing
-- [ ] More widgets: image, virtualized lists (RecyclerView / UICollectionView), switch, …
+- [ ] Layout: alignment, weights and sizing; today only stacks with padding and spacing
+- [ ] More UI elements: image, virtualized lists (RecyclerView / UICollectionView), switch, …
 - [ ] Components with local state and fine-grained updates instead of re-rendering `view()`
 - [ ] State updates from other threads / async code
 - [ ] Batching mutations into one FFI call
@@ -140,5 +140,13 @@ running the tests and how changes land.
 
 ## License
 
-rux is licensed under either of the [Apache License, Version 2.0](https://www.apache.org/licenses/LICENSE-2.0)
-or the [MIT license](https://opensource.org/licenses/MIT), at your option.
+rux is licensed under either of
+
+- the Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE)), or
+- the MIT license ([LICENSE-MIT](LICENSE-MIT)),
+
+at your option.
+
+Unless you explicitly state otherwise, any contribution intentionally submitted for inclusion in
+rux by you, as defined in the Apache-2.0 license, shall be dual licensed as above, without any
+additional terms or conditions.

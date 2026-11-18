@@ -54,3 +54,10 @@ builds `rux` (with the SDK) for macOS (arm64, x64), Linux (x64, arm64; static mu
 (x64), smoke-tests it (`rux setup`, `rux new`, `cargo check` of the app), and publishes a GitHub
 Release with the archives, `SHA256SUMS` and generated notes. Tags with a suffix (`v0.2.0-beta.1`)
 become pre-releases.
+
+## License
+
+Unless you explicitly state otherwise, any contribution intentionally submitted for inclusion in
+rux by you, as defined in the Apache-2.0 license, shall be dual licensed under the
+[Apache-2.0](LICENSE-APACHE) and [MIT](LICENSE-MIT) licenses, without any additional terms or
+conditions.

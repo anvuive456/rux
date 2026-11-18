@@ -9,10 +9,10 @@ No environment variables are needed:
 
 - **Android SDK:** found in Android Studio's default location (`~/Library/Android/sdk`,
   `~/Android/Sdk`, `%LOCALAPPDATA%\Android\Sdk`). Set `ANDROID_HOME` if yours is elsewhere.
-- **NDK** (needed to build Rust for Android): like Flutter's `ndkVersion`, you don't install it
-  yourself. `rux` uses the newest NDK in your SDK, and if there is none, installs a pinned version on
-  the first build, through the SDK's command-line tools. Pin an exact version with
-  `android-ndk-version = "…"` in `[package.metadata.rux]`, or point `ANDROID_NDK_HOME` at an NDK.
+- **NDK** (needed to build Rust for Android): you don't install it yourself. `rux` uses the
+  newest NDK in your SDK, and if there is none, installs a pinned version on the first build,
+  through the SDK's command-line tools. Pin an exact version with `android-ndk-version = "…"` in
+  `[package.metadata.rux]`, or point `ANDROID_NDK_HOME` at an NDK.
 - **JDK:** Gradle and the SDK tools run on `JAVA_HOME`, else `java` on PATH, else the JDK bundled
   with Android Studio. Gradle needs Java 17 or newer.
 - **Gradle:** each app ships a Gradle wrapper (`gradlew`), which downloads its pinned Gradle

@@ -1,5 +1,5 @@
 //! Locating the Android SDK and NDK — and installing the NDK when it's missing, like the
-//! Android Gradle Plugin does for Flutter's `ndkVersion` — so users don't have to install it
+//! Android Gradle Plugin does for a project's `ndkVersion` — so users don't have to install it
 //! or set environment variables themselves.
 
 use std::path::{Path, PathBuf};

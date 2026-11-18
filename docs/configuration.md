@@ -1,6 +1,6 @@
 # App configuration
 
-Like Flutter's `pubspec.yaml`, an app's id and version live in one place: its `Cargo.toml`.
+An app's id and version live in one place: its `Cargo.toml`.
 
 ```toml
 [package]

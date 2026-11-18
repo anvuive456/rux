@@ -1,8 +1,8 @@
 # Hot reload
 
-`rux run` stays attached to the app, like `flutter run`. It streams the app's logs (Android: logcat
-of the app's process, including Rust's stdout / stderr; iOS: the app's stdout / stderr) and reads
-single-key commands. In debug builds it hot reloads:
+`rux run` stays attached to the app. It streams the app's logs (Android: logcat of the app's
+process, including Rust's stdout / stderr; iOS: the app's stdout / stderr) and reads single-key
+commands. In debug builds it hot reloads:
 
 ```text
 🔥 Hot reload is on: save a file to hot reload.

@@ -2,7 +2,7 @@
 
 use anyhow::{Result, bail};
 
-/// App version from `version = "x.y.z+n"` in the app's Cargo.toml, like Flutter's pubspec:
+/// App version from `version = "x.y.z+n"` in the app's Cargo.toml:
 /// `x.y.z` is the version name (Android `versionName`, iOS `CFBundleShortVersionString`) and
 /// `n` is the build number (Android `versionCode`, iOS `CFBundleVersion`). `+n` defaults to 1.
 #[derive(Debug, PartialEq, Eq)]

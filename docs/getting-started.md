@@ -42,7 +42,7 @@ a browser is quarantined: run `xattr -d com.apple.quarantine rux` before `./rux 
 
 ### What `rux setup` does
 
-Like rustup, `rux setup`:
+`rux setup`:
 
 1. **Installs `rux` in `~/.rux/bin`** (the downloaded file can then go) and puts that directory on
    your PATH: the user `Path` on Windows; on macOS and Linux, a line sourcing `~/.rux/env` in
@@ -90,14 +90,13 @@ Options: `--name <package>` (default: the directory's name) and `--app-id <id>` 
 
 ## Project layout
 
-Like a Flutter app: shared Rust code in `src/`, tests in `tests/`, native shells in `android/` and
-`ios/`.
+Shared Rust code in `src/`, tests in `tests/`, native shells in `android/` and `ios/`.
 
 ```text
 my_app/
 ├── Cargo.toml          # version, app id, and the rux dependency
 ├── src/
-│   ├── lib.rs          # entry point (like main.dart): the root App + rux::main!
+│   ├── lib.rs          # entry point: the root App + rux::main!
 │   ├── state/          # app state, one file per piece of state
 │   └── views/          # UI, one file per view
 ├── tests/              # headless UI tests
@@ -111,9 +110,9 @@ read in sync with `Cargo.toml` (they are gitignored).
 
 ## One version: the CLI and the SDK
 
-Like Flutter's SDK, rux isn't published to a package registry. The `rux` CLI carries the rux SDK of
-its own version (the `rux` crate, the crates it depends on and the Android / iOS runtimes), so the
-tool and the library never drift apart.
+rux isn't published to a package registry. The `rux` CLI carries the rux SDK of its own version
+(the `rux` crate, the crates it depends on and the Android / iOS runtimes), so the tool and the
+library never drift apart.
 
 `rux setup` installs the SDK in `~/.rux/sdk/<version>` and links it into the app as `.rux/sdk`,
 which the app depends on:
@@ -123,7 +122,7 @@ which the app depends on:
 rux = { version = "=0.2.0", path = ".rux/sdk" }
 ```
 
-- `rux new` sets this up. After cloning an app, run `rux setup` once in it (like `flutter pub get`).
+- `rux new` sets this up. After cloning an app, run `rux setup` once in it.
 - `rux build` and `rux run` relink the SDK when it's missing or outdated.
 - An app states its rux version: a `rux` CLI of another version refuses to build it, and says which
   release to install, or how to move the app to the CLI's version.

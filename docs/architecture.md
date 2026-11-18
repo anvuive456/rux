@@ -26,7 +26,7 @@ operations natively plus a `Renderer` on the Rust side.
 | `rux` (root) | Facade: re-exports and the `rux::main!` macro that generates the per-platform entry points |
 | `crates/rux-core` | `Element`, `Mutation`, `Reconciler` (keyed diffing); platform independent |
 | `crates/rux-state` | `Signal<T>`: reactive state that schedules re-renders |
-| `crates/rux-ui` | Widgets: `column`, `row`, `view`, `scroll`, `text`, `button`, `text_input` |
+| `crates/rux-ui` | UI elements: `column`, `row`, `view`, `scroll`, `text`, `button`, `text_input` |
 | `crates/rux-platform` | `Renderer` trait, `Runtime` (per UI thread), hot reload, `testing::Harness` |
 | `crates/rux-android` | Android backend: calls `RuxHost` (Kotlin) over JNI |
 | `crates/rux-ios` | iOS backend: calls a C vtable provided by Swift |

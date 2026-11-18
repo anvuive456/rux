@@ -1,5 +1,5 @@
 //! The JDK that Gradle and the SDK's `sdkmanager` run on, so users don't have to install one or
-//! set `JAVA_HOME`: like Flutter, fall back to the JDK bundled with Android Studio.
+//! set `JAVA_HOME`: fall back to the JDK bundled with Android Studio.
 //!
 //! Order: `JAVA_HOME`, then `java` on PATH, then Android Studio's JDK (`jbr`, formerly `jre`).
 
