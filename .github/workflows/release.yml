@@ -87,7 +87,7 @@ jobs:
           # The embedded SDK is installed, linked and complete enough to build an app.
           export RUX_HOME="$RUNNER_TEMP/rux-home"
           "$rux" new "$RUNNER_TEMP/smoke-app"
-          "$rux" doctor | head -2
+          "$rux" doctor
           cargo check --manifest-path "$RUNNER_TEMP/smoke-app/Cargo.toml" --all-targets
 
       - name: Package
