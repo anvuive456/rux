@@ -16,6 +16,18 @@ use crate::app_id::{validate_android_app_id, validate_ios_bundle_id};
 /// Where new apps get the `rux` crate from (it isn't on crates.io yet).
 const RUX_GIT: &str = "https://github.com/anvuive456/rux";
 
+/// The release this CLI was built for (`vX.Y.Z`, set by the release workflow): apps created by
+/// a released CLI use rux from the same tag. Other builds use rux's default branch.
+const RELEASE_TAG: Option<&str> = option_env!("RUX_RELEASE_TAG");
+
+/// The `rux` dependency of a new app (outside rux's own workspace).
+fn git_dependency(tag: Option<&str>) -> String {
+    match tag.filter(|t| !t.is_empty()) {
+        Some(tag) => format!("{{ git = \"{RUX_GIT}\", tag = \"{tag}\" }}"),
+        None => format!("{{ git = \"{RUX_GIT}\" }}"),
+    }
+}
+
 /// `rust-toolchain.toml` of standalone apps: the Rust version rux needs.
 const TOOLCHAIN: &str = include_str!("../templates/app/rust-toolchain.toml.tmpl");
 
@@ -155,7 +167,7 @@ fn generate(dir: &Path, names: &Names, app_id: &str) -> Result<()> {
             if workspace.as_ref().is_some_and(|w| w.has_rux_dep) {
                 "{ workspace = true }".to_owned()
             } else {
-                format!("{{ git = \"{RUX_GIT}\" }}")
+                git_dependency(RELEASE_TAG)
             },
         ),
         ("rust_version", env!("CARGO_PKG_RUST_VERSION").to_owned()),
@@ -558,6 +570,16 @@ mod tests {
     }
 
     #[test]
+    fn released_cli_pins_rux_to_its_tag() {
+        assert_eq!(
+            git_dependency(Some("v1.2.3")),
+            format!("{{ git = \"{RUX_GIT}\", tag = \"v1.2.3\" }}")
+        );
+        assert_eq!(git_dependency(Some("")), git_dependency(None));
+        assert_eq!(git_dependency(None), format!("{{ git = \"{RUX_GIT}\" }}"));
+    }
+
+    #[test]
     fn matches_member_globs() {
         assert!(glob_match("examples/*", "examples/hello"));
         assert!(glob_match("crates/rux-*", "crates/rux-cli"));
@@ -651,7 +673,7 @@ mod tests {
         assert!(activity.is_file());
         assert!(dir.join("rust-toolchain.toml").is_file());
         let manifest = std::fs::read_to_string(dir.join("Cargo.toml")).unwrap();
-        assert!(manifest.contains(&format!("rux = {{ git = \"{RUX_GIT}\" }}")));
+        assert!(manifest.contains(&format!("rux = {}", git_dependency(RELEASE_TAG))));
         assert!(run(&dir, None, None).is_err(), "must not overwrite");
 
         // A failed run removes the directory it created.

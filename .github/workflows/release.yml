@@ -1,0 +1,138 @@
+name: Release
+
+# Pushing a tag `vX.Y.Z` (matching `version` in Cargo.toml) builds the `rux` CLI for every
+# platform and publishes a GitHub Release with the archives + SHA256SUMS.
+# Pull requests that touch this file only build (nothing is published).
+
+on:
+  push:
+    tags: ["v*"]
+  pull_request:
+    paths: [".github/workflows/release.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  # Only set for tag pushes: apps created by a released `rux new` use rux from this tag.
+  RUX_RELEASE_TAG: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || '' }}
+
+jobs:
+  check:
+    name: Check version
+    runs-on: ubuntu-latest
+    outputs:
+      toolchain: ${{ steps.v.outputs.toolchain }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: v
+        run: |
+          read -r version toolchain < <(python3 -c '
+          import tomllib
+          cargo = tomllib.load(open("Cargo.toml", "rb"))
+          toolchain = tomllib.load(open("rust-toolchain.toml", "rb"))
+          print(cargo["workspace"]["package"]["version"], toolchain["toolchain"]["channel"])')
+          echo "version $version, toolchain $toolchain"
+          if [[ -n "$RUX_RELEASE_TAG" && "$RUX_RELEASE_TAG" != "v$version" ]]; then
+            echo "::error::tag $RUX_RELEASE_TAG doesn't match version = \"$version\" in Cargo.toml"
+            exit 1
+          fi
+          echo "toolchain=$toolchain" >> "$GITHUB_OUTPUT"
+
+  build:
+    name: Build (${{ matrix.target }})
+    needs: check
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { target: aarch64-apple-darwin, os: macos-latest }
+          - { target: x86_64-apple-darwin, os: macos-latest, cross: true }
+          # musl: static binaries that run on any Linux distribution.
+          - { target: x86_64-unknown-linux-musl, os: ubuntu-latest }
+          - { target: aarch64-unknown-linux-musl, os: ubuntu-24.04-arm }
+          - { target: x86_64-pc-windows-msvc, os: windows-latest }
+    env:
+      # Overrides rust-toolchain.toml, which would also install the Android / iOS targets.
+      RUSTUP_TOOLCHAIN: ${{ needs.check.outputs.toolchain }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ needs.check.outputs.toolchain }}
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: release-${{ matrix.target }}
+
+      - name: Install musl tools
+        if: contains(matrix.target, 'musl')
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
+
+      - name: Build
+        run: cargo build --release --locked -p rux-cli --target ${{ matrix.target }}
+
+      - name: Smoke test
+        if: ${{ !matrix.cross }}
+        shell: bash
+        run: |
+          rux=target/${{ matrix.target }}/release/rux
+          "$rux" --version
+          "$rux" new "$RUNNER_TEMP/smoke-app"
+          grep '^rux = ' "$RUNNER_TEMP/smoke-app/Cargo.toml"
+          if [[ -n "$RUX_RELEASE_TAG" ]]; then
+            grep -F "tag = \"$RUX_RELEASE_TAG\"" "$RUNNER_TEMP/smoke-app/Cargo.toml"
+          fi
+
+      - name: Package
+        shell: bash
+        run: |
+          mkdir dist
+          dir=target/${{ matrix.target }}/release
+          name=rux-${{ matrix.target }}
+          if [[ "${{ matrix.target }}" == *windows* ]]; then
+            pwsh -Command "Compress-Archive -Path $dir/rux.exe -DestinationPath dist/$name.zip"
+          else
+            tar -czf "dist/$name.tar.gz" -C "$dir" rux
+          fi
+          ls -l dist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rux-${{ matrix.target }}
+          path: dist/*
+          if-no-files-found: error
+
+  release:
+    name: Publish GitHub Release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Checksums
+        working-directory: dist
+        run: sha256sum * | tee SHA256SUMS
+
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          flags=(--generate-notes --title "$RUX_RELEASE_TAG" --verify-tag)
+          # vX.Y.Z-beta.1 and the like are pre-releases.
+          if [[ "$RUX_RELEASE_TAG" == *-* ]]; then
+            flags+=(--prerelease)
+          fi
+          gh release create "$RUX_RELEASE_TAG" dist/* "${flags[@]}" --repo "$GITHUB_REPOSITORY"

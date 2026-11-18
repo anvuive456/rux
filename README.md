@@ -85,9 +85,37 @@ examples/counter/
 
 ## Getting started
 
+### Install the `rux` CLI
+
+Download it from the [latest release](https://github.com/anvuive456/rux/releases/latest) (macOS
+arm64 / x64, Linux x64 / arm64, Windows x64), or with a shell:
+
 ```sh
-cargo test --workspace                 # runs all tests, including the headless UI tests in examples/counter
-cargo install --path crates/rux-cli    # installs the `rux` CLI
+# macOS (Apple silicon); other archives: rux-x86_64-apple-darwin.tar.gz,
+# rux-x86_64-unknown-linux-musl.tar.gz, rux-aarch64-unknown-linux-musl.tar.gz
+curl -fsSL https://github.com/anvuive456/rux/releases/latest/download/rux-aarch64-apple-darwin.tar.gz \
+  | tar -xz -C ~/.local/bin                # any directory on your PATH
+```
+
+```powershell
+# Windows
+Invoke-WebRequest https://github.com/anvuive456/rux/releases/latest/download/rux-x86_64-pc-windows-msvc.zip -OutFile rux.zip
+Expand-Archive rux.zip -DestinationPath "$HOME\.rux\bin"   # then add it to PATH
+```
+
+Every release lists the archives' checksums in `SHA256SUMS`. Apps created by a released `rux new`
+use rux from the same release tag. On macOS, an archive downloaded with a browser is quarantined:
+run `xattr -d com.apple.quarantine rux` once.
+
+Or build it from source (apps it creates use rux's `main` branch):
+
+```sh
+cargo install --path crates/rux-cli
+```
+
+Then:
+
+```sh
 rux doctor                             # checks your toolchains
 ```
 
@@ -299,6 +327,25 @@ git switch -c feat/my-feature
 git push -u origin feat/my-feature
 gh pr create
 ```
+
+```sh
+cargo test --workspace                 # runs all tests, including the headless UI tests in examples/counter
+```
+
+### Releasing
+
+1. Bump `version` in `[workspace.package]` (root `Cargo.toml`) through a pull request.
+2. Once it's merged, tag `main` with the same version and push the tag:
+
+   ```sh
+   git switch main && git pull
+   git tag v0.2.0 && git push origin v0.2.0
+   ```
+
+The [Release workflow](.github/workflows/release.yml) checks that the tag matches the version,
+builds `rux` for macOS (arm64, x64), Linux (x64, arm64; static musl) and Windows (x64),
+smoke-tests it (`rux new`), and publishes a GitHub Release with the archives, `SHA256SUMS` and
+generated notes. Tags with a suffix (`v0.2.0-beta.1`) become pre-releases.
 
 ## Roadmap
 
