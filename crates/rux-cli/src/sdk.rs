@@ -243,6 +243,11 @@ mod tests {
     #[test]
     fn embeds_the_sdk() {
         let has = |p: &str| embedded::FILES.iter().any(|(f, _)| *f == p);
+        assert!(has("crates/rux-build/src/lib.rs"));
+        assert!(has(
+            "crates/rux-build/templates/android/gradle/wrapper/gradle-wrapper.jar"
+        ));
+        assert!(has("crates/rux-build/templates/ios/project.yml"));
         assert!(has("Cargo.toml") && has("src/lib.rs"));
         assert!(has("LICENSE-APACHE") && has("LICENSE-MIT"));
         assert!(has("crates/rux-core/Cargo.toml"));

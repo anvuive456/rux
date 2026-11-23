@@ -10,13 +10,16 @@ publish = false
 name = "{{lib_name}}"
 crate-type = ["lib", "cdylib", "staticlib"]
 
+[features]
+{{platform_features}}
 [dependencies]
 rux = {{rux_dep}}
 
+[build-dependencies]
+rux-build = {{rux_build_dep}}
+
 # Configuration for the `rux` CLI.
 [package.metadata.rux]
-android-project = "android"
-ios-project = "ios"
 # Android applicationId + iOS bundle identifier. Override per platform with
 # `android-app-id` / `ios-bundle-id` if they differ.
 app-id = "{{app_id}}"

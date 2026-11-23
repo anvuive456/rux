@@ -6,7 +6,7 @@ iOS apps are built on a Mac.
 
 - Xcode.
 - [XcodeGen](https://github.com/yonaskolb/XcodeGen): `brew install xcodegen`. The iOS project is
-  described by `ios/project.yml`; the `.xcodeproj` is generated from it (and gitignored).
+  described by `project.yml`; the `.xcodeproj` is generated from it (and gitignored).
 - The Rust tools `rux setup` installs: the iOS targets.
 
 `rux doctor` shows what's missing.
@@ -37,13 +37,13 @@ ios-development-team = "ABCDE12345"
 ## Build only
 
 ```sh
-rux build ios                        # → target/ios/<name>.xcframework
-cd ios && xcodegen && open *.xcodeproj
+rux build ios
 ```
 
-`rux build ios` builds the Rust library for devices and simulators (arm64) into an xcframework, and
-writes the files the Xcode project reads (`ios/rux.xcconfig`, `ios/rux.yml`). Run it before
-`xcodegen`.
+`rux build ios` builds the arm64 device and simulator libraries into an xcframework,
+writes `rux.xcconfig` and `rux.yml`, and prints the project directory.
+For apps created by `rux new`, the project is in Cargo's `OUT_DIR/ios`. Run
+`xcodegen && open *.xcodeproj` from the printed directory.
 
 The xcframework holds one profile at a time: `rux build ios` for the Debug configuration,
 `rux build ios --release` for Release (archives for TestFlight / the App Store). The project's

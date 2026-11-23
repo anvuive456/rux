@@ -79,34 +79,44 @@ rux setup
 ## Create an app
 
 ```sh
-rux new my_app
+rux new my_app --platforms android,ios
 cd my_app
-cargo test           # headless UI tests
-rux run android      # or: rux run ios
+cargo test
+rux run android
 ```
 
-Options: `--name <package>` (default: the directory's name) and `--app-id <id>` (default:
-`com.example.<name>`; see [App configuration](configuration.md)).
+`--platforms` defaults to both platforms. Pass `--platforms ios` or `--platforms android`
+for a single platform. `--name <package>` and `--app-id <id>` override the names derived
+from the directory.
 
 ## Project layout
 
-Shared Rust code in `src/`, tests in `tests/`, native shells in `android/` and `ios/`.
-
 ```text
 my_app/
-├── Cargo.toml          # version, app id, and the rux dependency
-├── src/
-│   ├── lib.rs          # entry point: the root App + rux::main!
-│   ├── state/          # app state, one file per piece of state
-│   └── views/          # UI, one file per view
+├── Cargo.toml          # Cargo features, app id and version
+├── build.rs            # renders native projects for enabled features
+├── src/                # shared Rust app
 ├── tests/              # headless UI tests
-├── android/            # Gradle project (a shell around the Rust library)
-├── ios/                # XcodeGen project (a shell around the Rust library)
-└── .rux/sdk            # link to the rux SDK (gitignored, made by `rux setup`)
+├── target/             # Cargo output, including generated native projects
+└── .rux/sdk            # link to the installed Rux SDK
 ```
 
-You write the app in `src/`. The native projects only host it: `rux build` keeps the files they
-read in sync with `Cargo.toml` (they are gitignored).
+`rux new` records the selected platforms as default Cargo features. For an iOS-only app:
+
+```toml
+[features]
+default = ["ios"]
+ios = ["rux/ios"]
+```
+
+`cargo build` generates the corresponding native project in the app build script's
+`OUT_DIR`, typically under `target/.../build/.../out/ios` or `out/android`.
+Use `cargo build --no-default-features` for a build with neither native project, or
+add `--features ios` to generate only iOS when that feature is available.
+
+`rux build ios` and `rux build android` select a target, wire the native plugins and runtime
+into the generated project, and build the Rust library for that platform. They print the
+generated project path. `rux run ios` and `rux run android` also build and launch the native app.
 
 ## One version: the CLI and the SDK
 

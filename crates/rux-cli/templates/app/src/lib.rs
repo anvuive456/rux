@@ -3,7 +3,7 @@
 //! - `state/`: app data, one file per piece of state.
 //! - `views/`: UI, one file per view.
 //!
-//! The native shells live in `android/` and `ios/`.
+//! Cargo generates the native projects for enabled platform features.
 
 pub mod state;
 pub mod views;

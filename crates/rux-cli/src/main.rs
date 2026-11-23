@@ -4,7 +4,7 @@
 //!
 //! ```text
 //! rux setup [--no-modify-path] [-y]
-//! rux new <dir> [--name <package>] [--app-id <id>]
+//! rux new <dir> [--name <package>] [--app-id <id>] [--platforms android,ios]
 //! rux doctor
 //! rux build android [--release] [--abi arm64-v8a --abi x86_64]
 //! rux build ios [--release]
@@ -54,7 +54,7 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Cmd {
-    /// Create a new app (Rust code, headless tests, Android and iOS projects).
+    /// Create a Rust app with features for the selected native platforms.
     New {
         /// Directory to create (must not exist, or be empty).
         dir: PathBuf,
@@ -64,6 +64,9 @@ enum Cmd {
         /// Application id for Android and iOS. Default: `com.example.<name>`.
         #[arg(long)]
         app_id: Option<String>,
+        /// Native platforms to enable for the app (comma-separated or repeated).
+        #[arg(long, value_delimiter = ',', default_value = "android,ios")]
+        platforms: Vec<Platform>,
     },
     /// Install `rux` in ~/.rux/bin and put it on PATH, install the rux library (SDK) of this
     /// CLI's version (linked into the app in the current directory / --path, if any), and the
@@ -78,7 +81,7 @@ enum Cmd {
     },
     /// Check the required toolchains.
     Doctor,
-    /// Build the native library and copy it into the platform project.
+    /// Generate native sources and build the library for selected platforms.
     Build {
         platform: Platform,
         #[command(flatten)]
@@ -116,18 +119,44 @@ struct BuildOpts {
     abis: Vec<String>,
 }
 
-#[derive(Clone, Copy, ValueEnum)]
+#[derive(Clone, Copy, PartialEq, Eq, ValueEnum)]
 enum Platform {
     Android,
     Ios,
 }
 
+impl Platform {
+    const ALL: [Self; 2] = [Self::Android, Self::Ios];
+
+    fn name(self) -> &'static str {
+        match self {
+            Self::Android => "android",
+            Self::Ios => "ios",
+        }
+    }
+
+    fn build(self, app: &AppCrate, release: bool, abis: &[String]) -> Result<()> {
+        match self {
+            Self::Android => android::build(app, release, abis).map(|_| ()),
+            Self::Ios => ios::build(app, release).map(|_| ()),
+        }
+    }
+}
+
 fn main() -> Result<()> {
     let cli = Cli::parse();
     match cli.command {
-        Cmd::New { dir, name, app_id } => {
-            new::run(&cli.path.join(dir), name.as_deref(), app_id.as_deref())
-        }
+        Cmd::New {
+            dir,
+            name,
+            app_id,
+            platforms,
+        } => new::run(
+            &cli.path.join(dir),
+            name.as_deref(),
+            app_id.as_deref(),
+            &platforms,
+        ),
         Cmd::Setup {
             no_modify_path,
             yes,
@@ -135,10 +164,9 @@ fn main() -> Result<()> {
         Cmd::Doctor => doctor::run(),
         Cmd::Build { platform, opts } => {
             let app = AppCrate::load(&cli.path)?;
-            match platform {
-                Platform::Android => android::build(&app, opts.release, &opts.abis),
-                Platform::Ios => ios::build(&app, opts.release),
-            }
+            app.require_platform(platform)?;
+            sdk::ensure(&app.dir)?;
+            platform.build(&app, opts.release, &opts.abis)
         }
         Cmd::Run {
             platform,
@@ -148,6 +176,8 @@ fn main() -> Result<()> {
             detach,
         } => {
             let app = AppCrate::load(&cli.path)?;
+            app.require_platform(platform)?;
+            sdk::ensure(&app.dir)?;
             let device = device.as_deref();
             let (hot, attach) = (!no_hot, !detach);
             match platform {

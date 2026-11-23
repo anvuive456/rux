@@ -1,6 +1,5 @@
 //! `rux new`: creates an app from the template in `templates/app` (same layout as
-//! `examples/counter`: Rust code in `src/`, headless tests in `tests/`, native shells in
-//! `android/` and `ios/`).
+//! Rust code in `src/`, headless tests in `tests/`, and a Cargo build script).
 //!
 //! The app depends on the rux SDK of this CLI's version, installed and linked into the app by
 //! `rux setup` (see `sdk`).
@@ -9,6 +8,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
 
+use crate::Platform;
 use crate::app::AppCrate;
 use crate::app_id::{validate_android_app_id, validate_ios_bundle_id};
 use crate::sdk;
@@ -16,88 +16,56 @@ use crate::sdk;
 /// `rust-toolchain.toml` of standalone apps: the Rust version rux needs.
 const TOOLCHAIN: &str = include_str!("../templates/app/rust-toolchain.toml.tmpl");
 
-enum Content {
-    /// Rendered: `{{key}}` placeholders are replaced.
-    Text(&'static str),
-    /// Copied as is.
-    Binary(&'static [u8]),
-}
-
-struct TemplateFile {
-    /// Destination, relative to the app directory; may contain placeholders.
-    path: &'static str,
-    content: Content,
-    executable: bool,
-}
-
-macro_rules! template {
-    ($path:literal, $src:literal) => {
-        template!($path, $src, text, false)
-    };
-    ($path:literal, $src:literal, text, $exec:literal) => {
-        TemplateFile {
-            path: $path,
-            content: Content::Text(include_str!(concat!("../templates/app/", $src))),
-            executable: $exec,
-        }
-    };
-    ($path:literal, $src:literal, binary) => {
-        TemplateFile {
-            path: $path,
-            content: Content::Binary(include_bytes!(concat!("../templates/app/", $src))),
-            executable: false,
-        }
-    };
-}
-
-const TEMPLATE: &[TemplateFile] = &[
-    template!("Cargo.toml", "Cargo.toml.tmpl"),
-    template!(".gitignore", "gitignore.tmpl"),
-    template!("src/lib.rs", "src/lib.rs"),
-    template!("src/state/mod.rs", "src/state/mod.rs"),
-    template!("src/state/counter.rs", "src/state/counter.rs"),
-    template!("src/views/mod.rs", "src/views/mod.rs"),
-    template!("src/views/home.rs", "src/views/home.rs"),
-    template!("tests/home_test.rs", "tests/home_test.rs"),
-    template!("android/settings.gradle.kts", "android/settings.gradle.kts"),
-    template!("android/build.gradle.kts", "android/build.gradle.kts"),
-    template!("android/gradle.properties", "android/gradle.properties"),
-    template!("android/gradlew", "android/gradlew", text, true),
-    template!("android/gradlew.bat", "android/gradlew.bat"),
-    template!(
-        "android/gradle/wrapper/gradle-wrapper.properties",
-        "android/gradle/wrapper/gradle-wrapper.properties"
+const TEMPLATE: &[(&str, &str)] = &[
+    (
+        "Cargo.toml",
+        include_str!("../templates/app/Cargo.toml.tmpl"),
     ),
-    template!(
-        "android/gradle/wrapper/gradle-wrapper.jar",
-        "android/gradle/wrapper/gradle-wrapper.jar",
-        binary
+    (
+        ".gitignore",
+        include_str!("../templates/app/gitignore.tmpl"),
     ),
-    template!(
-        "android/app/build.gradle.kts",
-        "android/app/build.gradle.kts"
+    ("build.rs", include_str!("../templates/app/build.rs.tmpl")),
+    ("src/lib.rs", include_str!("../templates/app/src/lib.rs")),
+    (
+        "src/state/mod.rs",
+        include_str!("../templates/app/src/state/mod.rs"),
     ),
-    template!(
-        "android/app/src/main/AndroidManifest.xml",
-        "android/app/src/main/AndroidManifest.xml"
+    (
+        "src/state/counter.rs",
+        include_str!("../templates/app/src/state/counter.rs"),
     ),
-    template!(
-        "android/app/src/main/java/{{android_package_dir}}/MainActivity.kt",
-        "android/MainActivity.kt.tmpl"
+    (
+        "src/views/mod.rs",
+        include_str!("../templates/app/src/views/mod.rs"),
     ),
-    template!("ios/project.yml", "ios/project.yml"),
-    template!(
-        "ios/Sources/AppDelegate.swift",
-        "ios/Sources/AppDelegate.swift"
+    (
+        "src/views/home.rs",
+        include_str!("../templates/app/src/views/home.rs"),
+    ),
+    (
+        "tests/home_test.rs",
+        include_str!("../templates/app/tests/home_test.rs"),
     ),
 ];
 
-pub fn run(dir: &Path, name: Option<&str>, app_id: Option<&str>) -> Result<()> {
-    run_in(&sdk::home()?, dir, name, app_id)
+pub fn run(
+    dir: &Path,
+    name: Option<&str>,
+    app_id: Option<&str>,
+    platforms: &[Platform],
+) -> Result<()> {
+    run_in(&sdk::home()?, dir, name, app_id, platforms)
 }
 
 /// `run` with the SDK installed under `home`.
-fn run_in(home: &Path, dir: &Path, name: Option<&str>, app_id: Option<&str>) -> Result<()> {
+fn run_in(
+    home: &Path,
+    dir: &Path,
+    name: Option<&str>,
+    app_id: Option<&str>,
+    platforms: &[Platform],
+) -> Result<()> {
     let dir = std::path::absolute(dir).with_context(|| format!("resolving {}", dir.display()))?;
     let existed = dir.exists();
     if existed && std::fs::read_dir(&dir)?.next().is_some() {
@@ -118,7 +86,7 @@ fn run_in(home: &Path, dir: &Path, name: Option<&str>, app_id: Option<&str>) -> 
         Some(id) => id.to_owned(),
         None => names.default_app_id(),
     };
-    validate_app_id(&app_id).with_context(|| {
+    validate_app_id(&app_id, platforms).with_context(|| {
         if app_id == names.default_app_id() {
             "the default app id derived from the name is invalid: pass --app-id".to_owned()
         } else {
@@ -127,32 +95,34 @@ fn run_in(home: &Path, dir: &Path, name: Option<&str>, app_id: Option<&str>) -> 
     })?;
 
     std::fs::create_dir_all(&dir).with_context(|| format!("creating {}", dir.display()))?;
-    let result = generate(home, &dir, &names, &app_id);
+    let result = generate(home, &dir, &names, &app_id, platforms);
     if result.is_err() && !existed {
         let _ = std::fs::remove_dir_all(&dir);
     }
     result
 }
 
-fn generate(home: &Path, dir: &Path, names: &Names, app_id: &str) -> Result<()> {
+fn generate(
+    home: &Path,
+    dir: &Path,
+    names: &Names,
+    app_id: &str,
+    platforms: &[Platform],
+) -> Result<()> {
     // Real paths: the relative paths written into the project must survive symlinks
     // (e.g. /tmp → /private/tmp on macOS).
     let dir = real_path(dir)?;
     let workspace = enclosing_workspace(&dir)?;
-    let target_dir = workspace.as_ref().map_or(&dir, |w| &w.root).join("target");
-    let ios_dir = dir.join("ios");
     // Inside rux's own workspace (e.g. `examples/`), the app uses its `rux`, not the SDK.
-    let uses_sdk = !workspace.as_ref().is_some_and(|w| w.has_rux_dep);
+    let uses_sdk = !workspace.as_ref().is_some_and(|w| w.rux_dep.is_some());
 
     let vars = [
         ("name", names.package.clone()),
         ("lib_name", names.lib.clone()),
-        ("project_name", names.project.clone()),
         ("app_struct", names.app_struct.clone()),
+        ("project_name", names.project.clone()),
         ("display_name", names.display.clone()),
         ("app_id", app_id.to_owned()),
-        ("android_package", app_id.to_owned()),
-        ("android_package_dir", app_id.replace('.', "/")),
         (
             "rux_dep",
             if uses_sdk {
@@ -166,12 +136,14 @@ fn generate(home: &Path, dir: &Path, names: &Names, app_id: &str) -> Result<()> 
             },
         ),
         ("rust_version", env!("CARGO_PKG_RUST_VERSION").to_owned()),
+        ("platform_features", platform_features(platforms)),
         (
-            "xcframework",
-            escape_quoted(&relative(
-                &ios_dir,
-                &target_dir.join(format!("ios/{}.xcframework", names.lib)),
-            )),
+            "rux_build_dep",
+            if uses_sdk {
+                format!("{{ path = \"{}/crates/rux-build\" }}", sdk::APP_LINK)
+            } else {
+                workspace_build_dependency(workspace.as_ref().expect("workspace dependency"), &dir)
+            },
         ),
         (
             "workspace",
@@ -186,20 +158,14 @@ fn generate(home: &Path, dir: &Path, names: &Names, app_id: &str) -> Result<()> 
         ),
     ];
 
-    for file in TEMPLATE {
-        let path = dir.join(render(file.path, &vars));
+    for (destination, template) in TEMPLATE {
+        let path = dir.join(destination);
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)
                 .with_context(|| format!("creating {}", parent.display()))?;
         }
-        let bytes = match file.content {
-            Content::Text(text) => render(text, &vars).into_bytes(),
-            Content::Binary(bytes) => bytes.to_vec(),
-        };
-        std::fs::write(&path, bytes).with_context(|| format!("writing {}", path.display()))?;
-        if file.executable {
-            make_executable(&path)?;
-        }
+        std::fs::write(&path, render(template, &vars))
+            .with_context(|| format!("writing {}", path.display()))?;
     }
     // rustup also looks for this file in parent directories: keep an enclosing one.
     let has_toolchain = dir
@@ -214,8 +180,12 @@ fn generate(home: &Path, dir: &Path, names: &Names, app_id: &str) -> Result<()> 
 
     // Catches template mistakes (bad placeholders, invalid ids) before the user does.
     let app = AppCrate::load(&dir).context("checking the generated Cargo.toml")?;
-    app.meta.android_app_id()?;
-    app.meta.ios_bundle_id()?;
+    for platform in platforms {
+        match platform {
+            Platform::Android => app.meta.android_app_id()?,
+            Platform::Ios => app.meta.ios_bundle_id()?,
+        };
+    }
 
     if uses_sdk {
         let (sdk_dir, _) = sdk::install(home)?;
@@ -247,11 +217,24 @@ fn generate(home: &Path, dir: &Path, names: &Names, app_id: &str) -> Result<()> 
         }
     }
     println!(
-        "\nNext:\n  cd {}\n  cargo test          # headless UI tests\n  rux run android     # \
-         or: rux run ios",
-        dir.display()
+        "\nNext:\n  cd {}\n  cargo test          # headless UI tests\n  rux run {}",
+        dir.display(),
+        platforms[0].name(),
     );
     Ok(())
+}
+
+fn platform_features(platforms: &[Platform]) -> String {
+    let names: Vec<_> = Platform::ALL
+        .into_iter()
+        .filter(|platform| platforms.contains(platform))
+        .map(Platform::name)
+        .collect();
+    let mut features = format!("default = {names:?}\n");
+    for name in names {
+        features.push_str(&format!("{name} = [\"rux/{name}\"]\n"));
+    }
+    features
 }
 
 /// The names derived from the package name.
@@ -260,7 +243,6 @@ struct Names {
     package: String,
     /// Library / native library name (`my_app` → `libmy_app.so`).
     lib: String,
-    /// Gradle / Xcode project name (`MyApp`).
     project: String,
     /// Root app struct (`MyApp`, `CounterApp`).
     app_struct: String,
@@ -328,11 +310,17 @@ fn validate_package_name(name: &str) -> Result<()> {
 
 /// The app id is used as is for Android (`applicationId` and the Kotlin package of
 /// `MainActivity`) and iOS (bundle id).
-fn validate_app_id(id: &str) -> Result<()> {
-    validate_android_app_id(id)?;
-    validate_ios_bundle_id(id)?;
-    if let Some(s) = id.split('.').find(|s| JVM_KEYWORDS.contains(s)) {
-        bail!("`{id}`: `{s}` is a Kotlin / Java keyword, so it can't be part of a package name");
+fn validate_app_id(id: &str, platforms: &[Platform]) -> Result<()> {
+    if platforms.contains(&Platform::Ios) {
+        validate_ios_bundle_id(id)?;
+    }
+    if platforms.contains(&Platform::Android) {
+        validate_android_app_id(id)?;
+        if let Some(s) = id.split('.').find(|s| JVM_KEYWORDS.contains(s)) {
+            bail!(
+                "`{id}`: `{s}` is a Kotlin / Java keyword, so it can't be part of a package name"
+            );
+        }
     }
     Ok(())
 }
@@ -416,8 +404,26 @@ struct Workspace {
     root: PathBuf,
     /// Whether the new app matches the workspace's `members`.
     has_member: bool,
-    /// Whether it has `rux` in `[workspace.dependencies]` (rux's own workspace does).
-    has_rux_dep: bool,
+    rux_dep: Option<toml::Value>,
+}
+
+fn workspace_build_dependency(workspace: &Workspace, app: &Path) -> String {
+    let dependency = workspace.rux_dep.as_ref().expect("workspace dependency");
+    if dependency.get("git").is_some() {
+        let fields = ["git", "branch", "tag", "rev"]
+            .into_iter()
+            .filter_map(|key| dependency.get(key).map(|value| format!("{key} = {value}")))
+            .collect::<Vec<_>>()
+            .join(", ");
+        return format!("{{ {fields} }}");
+    }
+
+    let root = dependency
+        .get("path")
+        .and_then(toml::Value::as_str)
+        .map_or_else(|| workspace.root.clone(), |path| workspace.root.join(path));
+    let path = relative(app, &root.join("crates/rux-build"));
+    format!("{{ path = {} }}", toml::Value::String(path))
 }
 
 /// The Cargo workspace above `dir`, if any (Cargo would reject a nested `[workspace]` there).
@@ -447,7 +453,7 @@ fn enclosing_workspace(dir: &Path) -> Result<Option<Workspace>> {
         return Ok(Some(Workspace {
             root: root.to_path_buf(),
             has_member,
-            has_rux_dep: ws.get("dependencies").and_then(|d| d.get("rux")).is_some(),
+            rux_dep: ws.get("dependencies").and_then(|d| d.get("rux")).cloned(),
         }));
     }
     Ok(None)
@@ -474,11 +480,6 @@ fn render(text: &str, vars: &[(&str, String)]) -> String {
     vars.iter().fold(text.to_owned(), |t, (k, v)| {
         t.replace(&format!("{{{{{k}}}}}"), v)
     })
-}
-
-/// For values inside `"…"` in TOML, Kotlin and YAML.
-fn escape_quoted(s: &str) -> String {
-    s.replace('\\', "\\\\").replace('"', "\\\"")
 }
 
 /// `to` relative to `from` (both absolute), with `/` separators; absolute if they share no
@@ -519,19 +520,6 @@ fn real_path(path: &Path) -> Result<PathBuf> {
     Ok(real)
 }
 
-#[cfg(unix)]
-fn make_executable(path: &Path) -> Result<()> {
-    use std::os::unix::fs::PermissionsExt;
-    let mut perms = std::fs::metadata(path)?.permissions();
-    perms.set_mode(perms.mode() | 0o111);
-    std::fs::set_permissions(path, perms).with_context(|| format!("chmod +x {}", path.display()))
-}
-
-#[cfg(not(unix))]
-fn make_executable(_: &Path) -> Result<()> {
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -540,7 +528,6 @@ mod tests {
     fn derives_names() {
         let n = Names::new("my-cool_app");
         assert_eq!(n.lib, "my_cool_app");
-        assert_eq!(n.project, "MyCoolApp");
         assert_eq!(n.app_struct, "MyCoolApp");
         assert_eq!(n.display, "My Cool App");
         assert_eq!(n.default_app_id(), "com.example.mycoolapp");
@@ -556,9 +543,9 @@ mod tests {
         for bad in ["2app", "-app", "my app", "my.app", "", "fn", "rux", "test"] {
             assert!(validate_package_name(bad).is_err(), "{bad}");
         }
-        assert!(validate_app_id("com.example.hello").is_ok());
+        assert!(validate_app_id("com.example.hello", &Platform::ALL).is_ok());
         for bad in ["com.example.new", "com.my-co.app", "com.my_co.app", "app"] {
-            assert!(validate_app_id(bad).is_err(), "{bad}");
+            assert!(validate_app_id(bad, &Platform::ALL).is_err(), "{bad}");
         }
     }
 
@@ -594,77 +581,28 @@ mod tests {
         let vars: Vec<_> = [
             "name",
             "lib_name",
-            "project_name",
             "app_struct",
+            "project_name",
             "display_name",
             "app_id",
-            "android_package",
-            "android_package_dir",
             "rux_dep",
+            "rux_build_dep",
+            "platform_features",
             "rust_version",
-            "xcframework",
             "workspace",
         ]
         .map(|k| (k, "x".to_owned()))
         .into();
         assert!(!render(TOOLCHAIN, &vars).contains("{{"));
-        for file in TEMPLATE {
-            assert!(!render(file.path, &vars).contains("{{"), "{}", file.path);
-            if let Content::Text(t) = file.content {
-                assert!(!render(t, &vars).contains("{{"), "{}", file.path);
-            }
+        for (path, template) in TEMPLATE {
+            assert!(!render(template, &vars).contains("{{"), "{path}");
         }
     }
 
-    /// The template's copies of `examples/counter` files must not drift from it (Gradle /
-    /// AGP versions, wrapper, runtime glue).
     #[test]
-    fn template_matches_counter_example() {
+    fn template_matches_toolchain() {
         let root = Path::new(env!("CARGO_MANIFEST_DIR"));
-        for file in [
-            "android/build.gradle.kts",
-            "android/gradle.properties",
-            "android/gradlew",
-            "android/gradlew.bat",
-            "android/gradle/wrapper/gradle-wrapper.properties",
-            "android/gradle/wrapper/gradle-wrapper.jar",
-            "ios/Sources/AppDelegate.swift",
-            "src/state/counter.rs",
-        ] {
-            let read = |p: PathBuf| std::fs::read(&p).unwrap_or_else(|e| panic!("{p:?}: {e}"));
-            assert!(
-                read(root.join("templates/app").join(file))
-                    == read(root.join("../../examples/counter").join(file)),
-                "templates/app/{file} differs from examples/counter/{file}"
-            );
-        }
-
         let read = |p: &str| std::fs::read_to_string(root.join(p)).unwrap();
-        let vars = [("project_name", "RuxCounter".to_owned())];
-        assert_eq!(
-            render(&read("templates/app/android/settings.gradle.kts"), &vars),
-            read("../../examples/counter/android/settings.gradle.kts"),
-        );
-        // Theme (`Theme.Rux`) and activity glue.
-        let vars = [
-            ("display_name", "Rux Counter".to_owned()),
-            ("android_package", "dev.rux.examples.counter".to_owned()),
-            ("lib_name", "counter".to_owned()),
-        ];
-        assert_eq!(
-            render(
-                &read("templates/app/android/app/src/main/AndroidManifest.xml"),
-                &vars
-            ),
-            read("../../examples/counter/android/app/src/main/AndroidManifest.xml"),
-        );
-        assert_eq!(
-            render(&read("templates/app/android/MainActivity.kt.tmpl"), &vars),
-            read(
-                "../../examples/counter/android/app/src/main/java/dev/rux/examples/counter/MainActivity.kt"
-            ),
-        );
-
         // Same toolchain as rux itself (comments aside).
         let settings = |t: &str| -> Vec<String> {
             t.lines()
@@ -685,13 +623,16 @@ mod tests {
         let _ = std::fs::remove_dir_all(&tmp);
         let home = tmp.join("rux-home");
         let dir = tmp.join("hello-world");
-        run_in(&home, &dir, None, None).unwrap();
+        run_in(&home, &dir, None, None, &[Platform::Ios]).unwrap();
 
         let app = AppCrate::load(&dir).unwrap();
         assert_eq!(app.lib_name, "hello_world");
         assert_eq!(app.meta.android_app_id().unwrap(), "com.example.helloworld");
-        let activity = dir.join("android/app/src/main/java/com/example/helloworld/MainActivity.kt");
-        assert!(activity.is_file());
+        assert!(dir.join("build.rs").is_file());
+        assert!(!dir.join("ios").exists());
+        assert!(!dir.join("android").exists());
+        assert!(app.has_platform_feature(Platform::Ios));
+        assert!(!app.has_platform_feature(Platform::Android));
         assert!(dir.join("rust-toolchain.toml").is_file());
         let manifest = std::fs::read_to_string(dir.join("Cargo.toml")).unwrap();
         let dep = format!(
@@ -710,13 +651,22 @@ mod tests {
                 .is_file()
         );
         assert!(
-            run_in(&home, &dir, None, None).is_err(),
+            run_in(&home, &dir, None, None, &[Platform::Ios]).is_err(),
             "must not overwrite"
         );
 
         // A failed run removes the directory it created.
         let bad = tmp.join("bad");
-        assert!(run_in(&home, &bad, None, Some("com.example.new")).is_err());
+        assert!(
+            run_in(
+                &home,
+                &bad,
+                None,
+                Some("com.example.new"),
+                &[Platform::Android]
+            )
+            .is_err()
+        );
         assert!(!bad.exists());
         std::fs::remove_dir_all(&tmp).unwrap();
     }

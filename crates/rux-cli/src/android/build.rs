@@ -1,12 +1,14 @@
 //! `rux build android`: writes `rux.properties` + `local.properties` and builds `lib<name>.so`
 //! with cargo-ndk into the Gradle project.
 
+use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
 
 use anyhow::{Context, Result, bail};
 
 use super::sdk::{SDK_HINT, ensure_ndk, sdk_dirs};
+use crate::Platform;
 use crate::app::AppCrate;
 use crate::deps::Deps;
 use crate::util::{run, run_quiet, write_generated};
@@ -14,48 +16,110 @@ use crate::util::{run, run_quiet, write_generated};
 /// ABI built when none is given.
 const DEFAULT_ABI: &str = "arm64-v8a";
 
-pub fn build(app: &AppCrate, release: bool, abis: &[String]) -> Result<()> {
-    let project = super::project_dir(app)?;
-    crate::sdk::ensure(&app.dir)?;
-    // Found in (or installed into) the SDK, so ANDROID_NDK_HOME is optional.
+pub fn build(app: &AppCrate, release: bool, abis: &[String]) -> Result<PathBuf> {
+    let default_abi = [DEFAULT_ABI.to_owned()];
+    let abis = if abis.is_empty() { &default_abi } else { abis };
+    anyhow::ensure!(
+        app.meta.android_project.is_some() || app.generates_native_projects(),
+        "missing `android-project` in [package.metadata.rux]"
+    );
+    let targets = abis
+        .iter()
+        .map(|abi| rust_target(abi))
+        .collect::<Result<Vec<_>>>()?;
+    let deps = Deps::for_build(app, Platform::Android, &targets)?;
     let ndk = ensure_ndk(app.meta.android_ndk_version.as_deref())?;
-    let deps = Deps::load(app)?;
-    let sources = crate::native::generate_android(&deps, &project)?;
-    write_config(&project, app, &deps.android_runtime()?, &sources)?;
-    write_sdk_dir(&project)?;
-    // Per build type (Gradle merges `src/<buildType>/jniLibs`): a debug build never ends up in
-    // a release APK / bundle, and a release build doesn't replace the debug one.
-    let jni_libs = project
-        .join("app/src")
-        .join(if release { "release" } else { "debug" })
-        .join("jniLibs");
-    remove_legacy_libs(&project, &app.lib_name)?;
-
     let mut cmd = Command::new("cargo");
-    cmd.arg("ndk")
-        .current_dir(&app.dir)
-        .env("ANDROID_NDK_HOME", &ndk);
-    let abis = if abis.is_empty() {
-        &[DEFAULT_ABI.to_owned()][..]
-    } else {
-        abis
-    };
+    cmd.current_dir(&app.dir)
+        .env("ANDROID_NDK_HOME", &ndk)
+        .arg("ndk");
     for abi in abis {
         cmd.args(["-t", abi]);
     }
-    cmd.arg("-o")
-        .arg(&jni_libs)
-        .args(["build", "-p", &app.package, "--lib"]);
+    let project = if let Some(path) = &app.meta.android_project {
+        let project = app.dir.join(path);
+        remove_legacy_libs(&project, &app.lib_name)?;
+        cmd.arg("-o").arg(jni_libs(&project, release));
+        build_args(&mut cmd, app, release);
+        run(&mut cmd)?;
+        project
+    } else {
+        let stage = app
+            .target_dir()?
+            .join(format!(".rux-jni-{}", std::process::id()));
+        std::fs::create_dir_all(stage.parent().context("missing Cargo target directory")?)?;
+        std::fs::create_dir(&stage)?;
+        let result = (|| -> Result<PathBuf> {
+            cmd.arg("-o").arg(&stage);
+            build_args(&mut cmd, app, release);
+            let project = ndk_out_dir(&mut cmd, &app.package, targets[0], true)?.join("android");
+            anyhow::ensure!(
+                project.join("settings.gradle.kts").is_file(),
+                "Android project was not generated in {}",
+                project.display()
+            );
+            let jni_libs = jni_libs(&project, release);
+            for abi in abis {
+                let dest = jni_libs.join(abi);
+                std::fs::create_dir_all(&dest)?;
+                for library in std::fs::read_dir(stage.join(abi))? {
+                    let library = library?;
+                    std::fs::copy(library.path(), dest.join(library.file_name()))?;
+                }
+            }
+            Ok(project)
+        })();
+        let _ = std::fs::remove_dir_all(&stage);
+        result?
+    };
+    let sources = crate::native::generate_android(&deps, &project)?;
+    write_config(&project, app, &deps.android_runtime()?, &sources)?;
+    write_sdk_dir(&project)?;
+    println!("→ Android project: {}", project.display());
+    Ok(project)
+}
+
+fn ndk_out_dir(cmd: &mut Command, package: &str, target: &str, trace: bool) -> Result<PathBuf> {
+    cmd.env("RUX_REPORT_ANDROID_OUT_DIR", "1")
+        .env("CARGO_TERM_COLOR", "never")
+        .env("CARGO_TERM_QUIET", "false")
+        .stderr(Stdio::piped());
+    if trace {
+        eprintln!("$ {cmd:?}");
+    }
+    let mut child = cmd.spawn().context("starting cargo ndk")?;
+    let stderr = child.stderr.take().context("capturing cargo ndk stderr")?;
+    let warning = format!("warning: {package}@");
+    let marker = format!(": RUX_ANDROID_OUT_DIR[{target}]=");
+    let mut out = None;
+    for line in BufReader::new(stderr).lines() {
+        let line = line?;
+        if line.starts_with(&warning) && line.contains(": RUX_ANDROID_OUT_DIR[") {
+            if let Some((_, path)) = line.split_once(&marker) {
+                out = Some(PathBuf::from(path));
+            }
+        } else {
+            eprintln!("{line}");
+        }
+    }
+    let status = child.wait()?;
+    anyhow::ensure!(status.success(), "command failed with {status}");
+    out.context("Cargo did not report an OUT_DIR for the Android app build script")
+}
+
+fn jni_libs(project: &Path, release: bool) -> PathBuf {
+    project
+        .join("app/src")
+        .join(if release { "release" } else { "debug" })
+        .join("jniLibs")
+}
+
+fn build_args(cmd: &mut Command, app: &AppCrate, release: bool) {
+    cmd.args(["build", "-p", &app.package, "--lib"])
+        .args(app.cargo_args(Platform::Android));
     if release {
         cmd.arg("--release");
     }
-    run(&mut cmd)?;
-    println!(
-        "→ copied lib{}.so into {}",
-        app.lib_name,
-        jni_libs.display()
-    );
-    Ok(())
 }
 
 /// rux used to build into `src/main/jniLibs` for every build type; a library left there would
@@ -81,14 +145,19 @@ fn remove_legacy_libs(project: &Path, lib_name: &str) -> Result<()> {
 /// Rebuilds just the app library for `abi` (debug) for hot reload; returns its path.
 pub fn hot_library(app: &AppCrate, abi: &str, target_dir: &Path) -> Result<PathBuf> {
     let ndk = ensure_ndk(app.meta.android_ndk_version.as_deref())?;
-    run_quiet(
-        Command::new("cargo")
-            .current_dir(&app.dir)
-            .env("ANDROID_NDK_HOME", &ndk)
-            .args(["ndk", "-t", abi, "build", "-p", &app.package, "--lib"]),
-    )?;
+    let mut cmd = Command::new("cargo");
+    cmd.current_dir(&app.dir)
+        .env("ANDROID_NDK_HOME", &ndk)
+        .args(["ndk", "-t", abi, "build", "-p", &app.package, "--lib"]);
+    let target = rust_target(abi)?;
+    cmd.args(app.cargo_args(Platform::Android));
+    if app.generates_native_projects() && app.meta.android_project.is_none() {
+        ndk_out_dir(&mut cmd, &app.package, target, false)?;
+    } else {
+        run_quiet(&mut cmd)?;
+    }
     Ok(target_dir
-        .join(rust_target(abi)?)
+        .join(target)
         .join("debug")
         .join(format!("lib{}.so", app.lib_name)))
 }

@@ -1,7 +1,8 @@
 import java.util.Properties
+import org.gradle.api.artifacts.VersionCatalogsExtension
 
 plugins {
-    id("com.android.application")
+    alias(libs.plugins.android.application)
 }
 
 // Application id (`app-id` in [package.metadata.rux]) and version name / code
@@ -58,8 +59,13 @@ android {
 }
 
 
+val ruxLibraries = extensions.getByType<VersionCatalogsExtension>().named("libs")
+
 dependencies {
     implementation(project(":rux-runtime"))
+    for (alias in ruxLibraries.libraryAliases) {
+        implementation(ruxLibraries.findLibrary(alias).get())
+    }
 }
 
 // The Rust library is built per build type: fail early instead of packaging an APK / bundle

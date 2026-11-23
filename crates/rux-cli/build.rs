@@ -38,7 +38,9 @@ fn main() {
         root.join("src"),
         root.join("platforms"),
     ];
-    for entry in std::fs::read_dir(root.join("crates")).unwrap() {
+    let crates = root.join("crates");
+    println!("cargo:rerun-if-changed={}", crates.display());
+    for entry in std::fs::read_dir(crates).unwrap() {
         let dir = entry.unwrap().path();
         if dir.join("Cargo.toml").is_file() && !dir.ends_with("rux-cli") {
             sources.push(dir);

@@ -1,49 +1,70 @@
 //! `rux build ios`: writes `rux.xcconfig` (bundle id, version, signing team) and builds `lib<name>.a` for device + simulator into an xcframework.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use anyhow::{Result, bail};
+use anyhow::{Context, Result, bail};
 
+use crate::Platform;
 use crate::app::AppCrate;
 use crate::deps::Deps;
-use crate::util::{run, write_generated};
+use crate::util::{cargo_out_dir, run, write_generated};
 
-pub fn build(app: &AppCrate, release: bool) -> Result<()> {
+const TARGETS: [&str; 2] = ["aarch64-apple-ios", "aarch64-apple-ios-sim"];
+
+pub fn build(app: &AppCrate, release: bool) -> Result<Option<PathBuf>> {
+    let deps = Deps::for_build(app, Platform::Ios, &TARGETS)?;
     if !cfg!(target_os = "macos") {
         bail!("building for iOS requires macOS + Xcode");
     }
-    crate::sdk::ensure(&app.dir)?;
-    if let Some(project) = super::project_dir(app) {
-        write_config(&project, app)?;
-        let deps = Deps::load(app)?;
-        write_project_include(&project, &deps.ios_runtime()?)?;
-        crate::native::generate_ios(&deps, &project)?;
-    }
+    let mut project = app.meta.ios_project.as_ref().map(|p| app.dir.join(p));
+    let generated = project.is_none() && app.generates_native_projects();
     let profile = if release { "release" } else { "debug" };
     let target_dir = app.target_dir()?;
     let lib_file = format!("lib{}.a", app.lib_name);
 
-    let targets = ["aarch64-apple-ios", "aarch64-apple-ios-sim"];
-    for t in targets {
+    for t in TARGETS {
         let mut cmd = Command::new("cargo");
         cmd.current_dir(&app.dir)
             .args(["build", "-p", &app.package, "--lib", "--target", t]);
+        cmd.args(app.cargo_args(Platform::Ios));
         if release {
             cmd.arg("--release");
         }
-        run(&mut cmd)?;
+        if generated && project.is_none() {
+            let out = cargo_out_dir(&mut cmd, &app.dir.join("Cargo.toml"))?;
+            let native = out.join("ios");
+            anyhow::ensure!(
+                native.join("project.yml").is_file(),
+                "iOS project was not generated in {}",
+                out.display()
+            );
+            project = Some(native);
+        } else {
+            run(&mut cmd)?;
+        }
     }
 
-    let out = target_dir
-        .join("ios")
-        .join(format!("{}.xcframework", app.lib_name));
+    if let Some(project) = &project {
+        write_config(project, app)?;
+        write_project_include(project, &deps.ios_runtime()?)?;
+        crate::native::generate_ios(&deps, project)?;
+    }
+    let output_dir = if generated {
+        project
+            .as_ref()
+            .context("missing generated iOS project")?
+            .clone()
+    } else {
+        target_dir.join("ios")
+    };
+    let out = output_dir.join(format!("{}.xcframework", app.lib_name));
     if out.exists() {
         std::fs::remove_dir_all(&out)?;
     }
     let mut cmd = Command::new("xcodebuild");
     cmd.arg("-create-xcframework");
-    for t in targets {
+    for t in TARGETS {
         cmd.arg("-library")
             .arg(target_dir.join(t).join(profile).join(&lib_file));
     }
@@ -54,13 +75,13 @@ pub fn build(app: &AppCrate, release: bool) -> Result<()> {
     write_generated(&profile_marker(&out), &format!("{profile}\n"))?;
 
     println!("→ {}", out.display());
-    if let Some(project) = super::project_dir(app) {
+    if let Some(project) = &project {
         println!(
             "  open the project: cd {} && xcodegen && open *.xcodeproj",
             project.display()
         );
     }
-    Ok(())
+    Ok(project)
 }
 
 /// `<name>.profile` next to `<name>.xcframework`: `debug` or `release`.

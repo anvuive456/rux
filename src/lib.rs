@@ -41,13 +41,13 @@ pub mod prelude {
     pub use rux_ui::*;
 }
 
-#[cfg(target_os = "android")]
+#[cfg(all(target_os = "android", feature = "android"))]
 #[doc(hidden)]
 pub mod __android {
     pub use rux_android::*;
 }
 
-#[cfg(target_os = "ios")]
+#[cfg(all(target_os = "ios", feature = "ios"))]
 #[doc(hidden)]
 pub mod __ios {
     pub use rux_ios::*;
@@ -62,9 +62,9 @@ pub mod __dev {
 ///
 /// Takes a callable expression (`fn() -> impl App`), e.g. `Counter::new` or `|| Hello`.
 ///
-/// - Android: generates the JNI functions `Java_dev_rux_runtime_RuxNative_*` (see `platforms/android`).
-/// - iOS: generates `rux_start` / `rux_dispatch` / `rux_stop` (see `platforms/ios/.../rux.h`).
-/// - Desktop: generates nothing — use [`testing::Harness`] to run headless.
+/// - Android with the `android` feature: generates `Java_dev_rux_runtime_RuxNative_*`.
+/// - iOS with the `ios` feature: generates `rux_start` / `rux_dispatch` / `rux_stop`.
+/// - Headless builds can use [`testing::Harness`].
 ///
 /// Debug builds also export the hot reload entry points (`nativeReload` / `rux_reload` for the
 /// dev client, `rux_dev_*` for the trampoline — see `rux_platform::dev`).
@@ -77,7 +77,19 @@ macro_rules! main {
             ::std::boxed::Box::new(($factory)())
         }
 
-        #[cfg(target_os = "android")]
+        $crate::__rux_android_entry_points!(__rux_create_app);
+        $crate::__rux_ios_entry_points!(__rux_create_app);
+        $crate::__rux_dev_entry_points!(__rux_create_app);
+    };
+}
+
+// Resolve backend features in the facade, where they are defined. The app supplies its factory.
+
+#[cfg(all(target_os = "android", feature = "android"))]
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __rux_android_entry_points {
+    ($factory:ident) => {
         const _: () = {
             use $crate::__android::jni::JNIEnv;
             use $crate::__android::jni::objects::{JClass, JObject, JString};
@@ -89,7 +101,7 @@ macro_rules! main {
                 _class: JClass<'l>,
                 host: JObject<'l>,
             ) {
-                $crate::__android::start(env, host, __rux_create_app);
+                $crate::__android::start(env, host, $factory);
             }
 
             #[unsafe(no_mangle)]
@@ -132,54 +144,27 @@ macro_rules! main {
                 $crate::__android::reload(env, path, keep_state != 0)
             }
         };
+    };
+}
 
-        #[cfg(all(debug_assertions, any(target_os = "android", target_os = "ios")))]
-        const _: () = {
-            use ::std::ffi::{c_char, c_void};
-            #[cfg(target_os = "android")]
-            use $crate::__android as backend;
-            use $crate::__dev::HotSignal;
-            #[cfg(target_os = "ios")]
-            use $crate::__ios as backend;
+#[cfg(not(all(target_os = "android", feature = "android")))]
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __rux_android_entry_points {
+    ($factory:ident) => {};
+}
 
-            #[unsafe(no_mangle)]
-            pub unsafe extern "C" fn rux_dev_start(
-                host: *const c_void,
-                prev: *const HotSignal,
-                prev_len: usize,
-                msg: *mut c_char,
-                msg_cap: usize,
-            ) -> u32 {
-                unsafe { backend::dev_start(host, prev, prev_len, msg, msg_cap, __rux_create_app) }
-            }
-
-            #[unsafe(no_mangle)]
-            pub unsafe extern "C" fn rux_dev_dispatch(
-                id: u64,
-                event: *const c_char,
-                value: *const c_char,
-            ) {
-                unsafe { backend::dev_dispatch(id, event, value) }
-            }
-
-            #[unsafe(no_mangle)]
-            pub unsafe extern "C" fn rux_dev_stop(len: *mut usize) -> *const HotSignal {
-                unsafe { backend::dev_stop(len) }
-            }
-
-            #[unsafe(no_mangle)]
-            pub unsafe extern "C" fn rux_dev_reply(call_id: u64, payload: *const u8, len: usize) {
-                unsafe { backend::dev_reply(call_id, payload, len) }
-            }
-        };
-
-        #[cfg(target_os = "ios")]
+#[cfg(all(target_os = "ios", feature = "ios"))]
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __rux_ios_entry_points {
+    ($factory:ident) => {
         const _: () = {
             use ::std::os::raw::c_char;
 
             #[unsafe(no_mangle)]
             pub extern "C" fn rux_start(vtable: $crate::__ios::RuxHostVTable) {
-                $crate::__ios::start(vtable, __rux_create_app);
+                $crate::__ios::start(vtable, $factory);
             }
 
             #[unsafe(no_mangle)]
@@ -215,4 +200,71 @@ macro_rules! main {
             }
         };
     };
+}
+
+#[cfg(not(all(target_os = "ios", feature = "ios")))]
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __rux_ios_entry_points {
+    ($factory:ident) => {};
+}
+
+#[cfg(any(
+    all(target_os = "android", feature = "android"),
+    all(target_os = "ios", feature = "ios"),
+))]
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __rux_dev_entry_points {
+    ($factory:ident) => {
+        #[cfg(debug_assertions)]
+        const _: () = {
+            use ::std::ffi::{c_char, c_void};
+            #[cfg(target_os = "android")]
+            use $crate::__android as backend;
+            use $crate::__dev::HotSignal;
+            #[cfg(target_os = "ios")]
+            use $crate::__ios as backend;
+
+            #[unsafe(no_mangle)]
+            pub unsafe extern "C" fn rux_dev_start(
+                host: *const c_void,
+                prev: *const HotSignal,
+                prev_len: usize,
+                msg: *mut c_char,
+                msg_cap: usize,
+            ) -> u32 {
+                unsafe { backend::dev_start(host, prev, prev_len, msg, msg_cap, $factory) }
+            }
+
+            #[unsafe(no_mangle)]
+            pub unsafe extern "C" fn rux_dev_dispatch(
+                id: u64,
+                event: *const c_char,
+                value: *const c_char,
+            ) {
+                unsafe { backend::dev_dispatch(id, event, value) }
+            }
+
+            #[unsafe(no_mangle)]
+            pub unsafe extern "C" fn rux_dev_stop(len: *mut usize) -> *const HotSignal {
+                unsafe { backend::dev_stop(len) }
+            }
+
+            #[unsafe(no_mangle)]
+            pub unsafe extern "C" fn rux_dev_reply(call_id: u64, payload: *const u8, len: usize) {
+                unsafe { backend::dev_reply(call_id, payload, len) }
+            }
+        };
+    };
+}
+
+#[cfg(not(any(
+    all(target_os = "android", feature = "android"),
+    all(target_os = "ios", feature = "ios"),
+)))]
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __rux_dev_entry_points {
+    ($factory:ident) => {};
 }

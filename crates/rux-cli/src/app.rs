@@ -1,11 +1,13 @@
 //! The app crate: its `Cargo.toml`, `[package.metadata.rux]` and cargo's target directory.
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use anyhow::{Context, Result, bail};
 use serde::Deserialize;
 
+use crate::Platform;
 use crate::app_id::{validate_android_app_id, validate_ios_bundle_id};
 use crate::version::AppVersion;
 
@@ -13,6 +15,10 @@ use crate::version::AppVersion;
 struct Manifest {
     package: Package,
     lib: Option<Lib>,
+    #[serde(default)]
+    features: BTreeMap<String, Vec<String>>,
+    #[serde(default, rename = "build-dependencies")]
+    build_dependencies: toml::Table,
 }
 
 #[derive(Deserialize)]
@@ -90,6 +96,8 @@ pub struct AppCrate {
     pub lib_name: String,
     pub version: AppVersion,
     pub meta: RuxMeta,
+    generates_native_projects: bool,
+    features: BTreeMap<String, Vec<String>>,
 }
 
 impl AppCrate {
@@ -114,7 +122,37 @@ impl AppCrate {
             lib_name,
             version,
             meta: m.package.metadata.rux,
+            features: m.features,
+            generates_native_projects: m.build_dependencies.contains_key("rux-build"),
         })
+    }
+
+    pub fn generates_native_projects(&self) -> bool {
+        self.generates_native_projects
+    }
+
+    pub fn has_platform_feature(&self, platform: Platform) -> bool {
+        self.features.contains_key(platform.name())
+    }
+
+    pub fn cargo_args(&self, platform: Platform) -> [&'static str; 2] {
+        let feature = match (platform, self.generates_native_projects) {
+            (Platform::Android, true) => "android",
+            (Platform::Ios, true) => "ios",
+            (Platform::Android, false) => "rux/android",
+            (Platform::Ios, false) => "rux/ios",
+        };
+        ["--features", feature]
+    }
+
+    pub fn require_platform(&self, platform: Platform) -> Result<()> {
+        if self.generates_native_projects && !self.has_platform_feature(platform) {
+            let name = platform.name();
+            bail!(
+                "platform {name} is disabled. Add `{name} = [\"rux/{name}\"]` to [features] in Cargo.toml"
+            );
+        }
+        Ok(())
     }
 
     pub fn target_dir(&self) -> Result<PathBuf> {
