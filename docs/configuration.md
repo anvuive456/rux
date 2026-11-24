@@ -8,8 +8,6 @@ name = "my_app"
 version = "1.2.3+45"   # version name 1.2.3, build number 45 (`+n` defaults to 1)
 
 [package.metadata.rux]
-android-project = "android"
-ios-project = "ios"
 app-id = "com.example.myapp"           # Android applicationId and iOS bundle identifier
 ```
 
@@ -32,8 +30,8 @@ app-id = "com.example.myapp"           # Android applicationId and iOS bundle id
 
 | Key | |
 |-----|-|
-| `android-project` | The Gradle project directory (`rux new`: `android`) |
-| `ios-project` | The XcodeGen project directory (`rux new`: `ios`) |
+| `android-project` | Optional path to a custom Gradle project. New apps generate it in Cargo’s `OUT_DIR`. |
+| `ios-project` | Optional path to a custom Xcode project. New apps generate it in Cargo’s `OUT_DIR`. |
 | `app-id` | Application id for both platforms |
 | `android-app-id` | Overrides `app-id` on Android |
 | `ios-bundle-id` | Overrides `app-id` on iOS |
@@ -41,3 +39,24 @@ app-id = "com.example.myapp"           # Android applicationId and iOS bundle id
 | `ios-development-team` | Apple team to sign device builds with (default: the Mac's only one) |
 | `[package.metadata.rux.native]` | Implementations of native APIs (see [Native APIs](native-apis.md)) |
 | `[package.metadata.rux.plugin]` | Plugins only: where their Kotlin / Swift sources live |
+
+## Native dependencies in `rux.toml`
+
+Declare libraries for generated native projects in `rux.toml` next to `Cargo.toml`.
+
+```toml
+[dependencies.android]
+okhttp = "com.squareup.okhttp3:okhttp:4.12.0"
+
+[dependencies.ios]
+Alamofire = { url = "https://github.com/Alamofire/Alamofire.git", version = "5.9.1", product = "Alamofire" }
+```
+
+Android accepts `group:artifact:version` coordinates. Cargo writes them to
+`OUT_DIR/android/gradle/libs.versions.toml` using `[versions]`, `[libraries]`, and
+`version.ref`. The app module uses the catalog aliases for its `implementation` dependencies.
+Maven artifacts resolve through the repositories configured by the generated Gradle project.
+
+On iOS, Cargo adds each Swift package at the exact declared version and links its
+product to the generated Xcode app target. Both generated projects follow the enabled
+Cargo platform features.

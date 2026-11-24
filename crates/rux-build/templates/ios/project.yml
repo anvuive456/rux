@@ -12,7 +12,7 @@ options:
 # rux.yml (gitignored) by `rux build ios`.
 include:
   - rux.yml
-
+{{ios_packages}}
 targets:
   {{project_name}}:
     type: application
@@ -51,3 +51,4 @@ targets:
       - package: RuxRuntime
       - framework: "{{xcframework}}"
         embed: false
+{{ios_dependencies}}

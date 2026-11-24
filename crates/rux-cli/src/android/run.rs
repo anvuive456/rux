@@ -38,9 +38,7 @@ pub fn run(
     } else {
         abis.to_vec()
     };
-    super::build(app, release, &abis)?;
-
-    let project = super::project_dir(app)?;
+    let project = super::build(app, release, &abis)?;
     let task = if release {
         "installRelease"
     } else {

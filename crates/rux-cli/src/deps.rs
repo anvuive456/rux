@@ -11,6 +11,7 @@ use std::process::Command;
 use anyhow::{Context, Result, bail};
 use serde_json::Value;
 
+use crate::Platform;
 use crate::app::AppCrate;
 
 pub struct Deps {
@@ -19,12 +20,18 @@ pub struct Deps {
 }
 
 impl Deps {
-    pub fn load(app: &AppCrate) -> Result<Self> {
-        let out = Command::new("cargo")
-            .args(["metadata", "--format-version=1"])
-            .current_dir(&app.dir)
-            .output()
-            .context("running cargo metadata")?;
+    fn load(app: &AppCrate, platform: Platform, target: &str) -> Result<Self> {
+        let mut command = Command::new("cargo");
+        command
+            .args([
+                "metadata",
+                "--format-version=1",
+                "--filter-platform",
+                target,
+            ])
+            .current_dir(&app.dir);
+        command.args(app.cargo_args(platform));
+        let out = command.output().context("running cargo metadata")?;
         if !out.status.success() {
             bail!(
                 "cargo metadata failed: {}",
@@ -46,23 +53,26 @@ impl Deps {
             .and_then(|p| p["id"].as_str())
             .context("app package not found in cargo metadata")?;
 
-        let nodes: BTreeMap<&str, Vec<&str>> = meta["resolve"]["nodes"]
+        let nodes: BTreeMap<&str, &Value> = meta["resolve"]["nodes"]
             .as_array()
             .context("no dependency graph")?
             .iter()
-            .filter_map(|n| {
-                let deps = n["deps"]
-                    .as_array()?
-                    .iter()
-                    .filter_map(|d| d["pkg"].as_str())
-                    .collect();
-                Some((n["id"].as_str()?, deps))
-            })
+            .filter_map(|n| Some((n["id"].as_str()?, n)))
             .collect();
         let mut seen = BTreeSet::from([app_id]);
         let mut queue = VecDeque::from([app_id]);
         while let Some(id) = queue.pop_front() {
-            for &dep in nodes.get(id).into_iter().flatten() {
+            let deps = nodes[id]["deps"]
+                .as_array()
+                .context("no dependency edges")?;
+            for dep in deps.iter().filter_map(|dep| {
+                let kinds = dep["dep_kinds"].as_array()?;
+                if kinds.iter().any(|kind| kind["kind"].is_null()) {
+                    dep["pkg"].as_str()
+                } else {
+                    None
+                }
+            }) {
                 if seen.insert(dep) {
                     queue.push_back(dep);
                 }
@@ -75,6 +85,20 @@ impl Deps {
             .cloned()
             .collect();
         Ok(Self { packages })
+    }
+
+    pub fn for_build(app: &AppCrate, platform: Platform, targets: &[&str]) -> Result<Self> {
+        // All ABIs / variants of the platform share one native source project.
+        let mut packages = BTreeMap::new();
+        for target in targets {
+            let deps = Self::load(app, platform, target)?;
+            for package in deps.packages {
+                packages.insert(package["id"].as_str().unwrap().to_owned(), package);
+            }
+        }
+        Ok(Self {
+            packages: packages.into_values().collect(),
+        })
     }
 
     pub fn packages(&self) -> &[Value] {
@@ -92,11 +116,7 @@ impl Deps {
     }
 
     fn runtime(&self, rel: &str, marker: &str) -> Result<PathBuf> {
-        let rux = self
-            .packages
-            .iter()
-            .find(|p| p["name"] == "rux")
-            .context("the app doesn't depend on the `rux` crate")?;
+        let rux = self.rux()?;
         let dir = package_dir(rux)?.join(rel);
         if !dir.join(marker).is_file() {
             bail!(
@@ -105,6 +125,13 @@ impl Deps {
             );
         }
         Ok(dir)
+    }
+
+    fn rux(&self) -> Result<&Value> {
+        self.packages
+            .iter()
+            .find(|p| p["name"] == "rux")
+            .context("the app doesn't depend on the `rux` crate")
     }
 }
 
@@ -124,7 +151,7 @@ mod tests {
     fn finds_runtimes_in_the_resolved_rux_crate() {
         let root = std::fs::canonicalize(concat!(env!("CARGO_MANIFEST_DIR"), "/../..")).unwrap();
         let app = AppCrate::load(&root.join("examples/counter")).unwrap();
-        let deps = Deps::load(&app).unwrap();
+        let deps = Deps::for_build(&app, Platform::Ios, &["aarch64-apple-ios"]).unwrap();
         let canon = |p: PathBuf| std::fs::canonicalize(p).unwrap();
         assert_eq!(
             canon(deps.android_runtime().unwrap()),
@@ -139,5 +166,24 @@ mod tests {
                 .iter()
                 .any(|p| p["name"] == "rux-device-info")
         );
+    }
+
+    #[test]
+    fn resolves_only_the_selected_backend() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let app = AppCrate::load(&root.join("examples/counter")).unwrap();
+        for (platform, target, expected_backend) in [
+            (Platform::Ios, "aarch64-apple-ios", "rux-ios"),
+            (Platform::Android, "aarch64-linux-android", "rux-android"),
+        ] {
+            let deps = Deps::for_build(&app, platform, &[target]).unwrap();
+            let backends: Vec<_> = deps
+                .packages()
+                .iter()
+                .filter_map(|pkg| pkg["name"].as_str())
+                .filter(|name| matches!(*name, "rux-ios" | "rux-android"))
+                .collect();
+            assert_eq!(backends, [expected_backend]);
+        }
     }
 }

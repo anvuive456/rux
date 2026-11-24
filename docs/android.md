@@ -15,7 +15,7 @@ No environment variables are needed:
   `[package.metadata.rux]`, or point `ANDROID_NDK_HOME` at an NDK.
 - **JDK:** Gradle and the SDK tools run on `JAVA_HOME`, else `java` on PATH, else the JDK bundled
   with Android Studio. Gradle needs Java 17 or newer.
-- **Gradle:** each app ships a Gradle wrapper (`gradlew`), which downloads its pinned Gradle
+- **Gradle:** each generated Android project includes a Gradle wrapper (`gradlew`), which downloads its pinned Gradle
   version once into `~/.gradle`. `rux build android` writes `sdk.dir` into `local.properties`.
 
 `rux doctor` shows what's found and where.
@@ -47,13 +47,15 @@ rux build android                          # arm64-v8a
 rux build android --abi arm64-v8a --abi x86_64
 ```
 
-This builds `lib<name>.so` into `android/app/src/debug/jniLibs/<abi>/` (with `--release`:
-`android/app/src/release/jniLibs/<abi>/`, the one release APKs and bundles get) and writes the
-files Gradle reads (`android/rux.properties`, `local.properties`). Then build the APK with Gradle, or open
-`android/` in Android Studio and Run:
+This copies `lib<name>.so` into `app/src/debug/jniLibs/<abi>/` in the Android project.
+Release builds use `app/src/release/jniLibs/<abi>/`. The command also writes
+`rux.properties` and `local.properties` in the project.
+
+For apps created by `rux new`, the project lives under Cargo's `OUT_DIR/android`. Open the
+project directory printed by the command in Android Studio, or run the wrapper from that directory.
 
 ```sh
-cd android && ./gradlew assembleDebug      # Windows: gradlew.bat assembleDebug
+./gradlew assembleDebug                    # Windows: gradlew.bat assembleDebug
 ```
 
-The ABIs in `android/app/build.gradle.kts` (`abiFilters`) must match the ones you build.
+The ABIs in `app/build.gradle.kts` (`abiFilters`) must match the ones you build.

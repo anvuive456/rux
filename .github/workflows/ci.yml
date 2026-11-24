@@ -39,16 +39,21 @@ jobs:
 
       # Type-check the macro-generated JNI / C entry points for the mobile targets.
       - name: Check (Android target)
-        run: cargo check -p rux-example-counter --target aarch64-linux-android
+        run: cargo check -p rux-example-counter --target aarch64-linux-android --features rux/android
 
       - name: Check (iOS target)
-        run: cargo check -p rux-example-counter --target aarch64-apple-ios
+        run: cargo check -p rux-example-counter --target aarch64-apple-ios --features rux/ios
 
       # `rux new`: the generated app's tests pass (warnings are errors) outside the checkout.
       - name: rux new + test
         run: |
-          cargo run -p rux-cli -- new "$RUNNER_TEMP/hello-rux"
-          cargo test --manifest-path "$RUNNER_TEMP/hello-rux/Cargo.toml"
+          app="$RUNNER_TEMP/hello-rux"
+          cargo run -p rux-cli -- new "$app" --platforms ios
+          test ! -e "$app/ios"
+          test ! -e "$app/android"
+          cargo test --manifest-path "$app/Cargo.toml"
+          test -n "$(find "$app/target" -path '*/out/ios/project.yml' -print -quit)"
+          test -z "$(find "$app/target" -path '*/out/android' -print -quit)"
 
   android:
     name: Android
@@ -109,9 +114,11 @@ jobs:
       - name: rux new + build APK
         run: |
           export ANDROID_NDK_HOME="$ANDROID_NDK_LATEST_HOME"
-          cargo run -p rux-cli -- new "$RUNNER_TEMP/hello-rux"
+          cargo run -p rux-cli -- new "$RUNNER_TEMP/hello-rux" --platforms android
           cargo run -p rux-cli -- build android --path "$RUNNER_TEMP/hello-rux" --abi x86_64
-          cd "$RUNNER_TEMP/hello-rux/android" && ./gradlew assembleDebug --no-daemon
+          project=$(find "$RUNNER_TEMP/hello-rux/target/x86_64-linux-android/debug/build" -path '*/out/android' -type d -print -quit)
+          cd "${project:?missing generated Android project}"
+          ./gradlew assembleDebug --no-daemon
 
   ios:
     name: iOS
@@ -153,9 +160,11 @@ jobs:
       # `rux new`: the generated iOS project builds as is, outside the checkout.
       - name: rux new + build app (simulator)
         run: |
-          cargo run -p rux-cli -- new "$RUNNER_TEMP/hello-rux"
+          cargo run -p rux-cli -- new "$RUNNER_TEMP/hello-rux" --platforms ios
           cargo run -p rux-cli -- build ios --path "$RUNNER_TEMP/hello-rux"
-          cd "$RUNNER_TEMP/hello-rux/ios" && xcodegen generate
+          project=$(find "$RUNNER_TEMP/hello-rux/target/aarch64-apple-ios/debug/build" -path '*/out/ios' -type d -print -quit)
+          cd "${project:?missing generated iOS project}"
+          xcodegen generate
           xcodebuild build \
             -project HelloRux.xcodeproj \
             -scheme HelloRux \

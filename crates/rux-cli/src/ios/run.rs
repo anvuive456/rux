@@ -10,6 +10,7 @@ use anyhow::{Context, Result, bail};
 use super::devicectl::Device;
 use super::signing::development_team;
 use super::simctl::Simulator;
+use crate::Platform;
 use crate::app::AppCrate;
 use crate::hot::{self, DevServer, HotReload, Logs};
 use crate::util::{on_path, run as run_cmd, run_quiet};
@@ -32,16 +33,6 @@ pub fn run(
     }
     // Fail on config / tool / device problems before the (slow) builds.
     let bundle_id = app.meta.ios_bundle_id()?;
-    let project =
-        super::project_dir(app).context("missing `ios-project` in [package.metadata.rux]")?;
-    // The .xcodeproj is generated (and gitignored) when the project uses XcodeGen.
-    let xcodegen = if project.join("project.yml").is_file() {
-        Some(on_path("xcodegen").context(
-            "`xcodegen` not found (the iOS project uses project.yml): brew install xcodegen",
-        )?)
-    } else {
-        None
-    };
     let target = pick_target(device)?;
     let team = match &target {
         Target::Simulator(sim) => {
@@ -54,7 +45,15 @@ pub fn run(
         }
     };
 
-    super::build(app, release)?;
+    let project = super::build(app, release)?.context("missing iOS project")?;
+    // The .xcodeproj is generated (and gitignored) when the project uses XcodeGen.
+    let xcodegen = if project.join("project.yml").is_file() {
+        Some(on_path("xcodegen").context(
+            "`xcodegen` not found (the iOS project uses project.yml): brew install xcodegen",
+        )?)
+    } else {
+        None
+    };
 
     if let Some(xcodegen) = xcodegen {
         run_cmd(Command::new(xcodegen).arg("generate").current_dir(&project))?;
@@ -228,14 +227,11 @@ const DEV_SERVER_ENV: &str = "RUX_DEV_SERVER";
 /// Rebuilds just the app library (debug, simulator) for hot reload; returns its path.
 fn hot_library(app: &AppCrate, target_dir: &Path) -> Result<PathBuf> {
     const TARGET: &str = "aarch64-apple-ios-sim";
-    run_quiet(Command::new("cargo").current_dir(&app.dir).args([
-        "build",
-        "-p",
-        &app.package,
-        "--lib",
-        "--target",
-        TARGET,
-    ]))?;
+    let mut cmd = Command::new("cargo");
+    cmd.current_dir(&app.dir)
+        .args(["build", "-p", &app.package, "--lib", "--target", TARGET]);
+    cmd.args(app.cargo_args(Platform::Ios));
+    run_quiet(&mut cmd)?;
     Ok(target_dir
         .join(TARGET)
         .join("debug")
